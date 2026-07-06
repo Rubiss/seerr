@@ -2,62 +2,16 @@ import { IssueType, IssueTypeName } from '@server/constants/issue';
 import { MediaType } from '@server/constants/media';
 import { getRepository } from '@server/datasource';
 import { User } from '@server/entity/User';
-import { defineMessages, getIntl } from '@server/i18n';
-import globalMessages from '@server/i18n/globalMessages';
 import PreparedEmail from '@server/lib/email';
 import type { NotificationAgentEmail } from '@server/lib/settings';
 import { NotificationAgentKey, getSettings } from '@server/lib/settings';
 import logger from '@server/logger';
-import type { AvailableLocale } from '@server/types/languages';
 import type { EmailOptions } from 'email-templates';
 import path from 'path';
 import validator from 'validator';
 import { Notification, shouldSendAdminNotification } from '..';
 import type { NotificationAgent, NotificationPayload } from './agent';
 import { BaseAgent } from './agent';
-
-const PUBLIC_LOGO_URL =
-  'https://raw.githubusercontent.com/seerr-team/seerr/refs/heads/develop/public/logo_full.svg';
-
-const messages = defineMessages('notifications.agents.email', {
-  issueType: '{type} issue',
-  issue: 'issue',
-  pendingRequest:
-    'A new request for the following {mediaType} is pending approval:',
-  pendingRequest4k:
-    'A new request for the following {mediaType} in 4K is pending approval:',
-  autoRequested:
-    'A new request for the following {mediaType} was automatically submitted:',
-  autoRequested4k:
-    'A new request for the following {mediaType} in 4K was automatically submitted:',
-  approvedRequest:
-    'Your request for the following {mediaType} has been approved:',
-  approvedRequest4k:
-    'Your request for the following {mediaType} in 4K has been approved:',
-  autoApproved:
-    'A new request for the following {mediaType} has been automatically approved:',
-  autoApproved4k:
-    'A new request for the following {mediaType} in 4K has been automatically approved:',
-  availableRequest:
-    'Your request for the following {mediaType} is now available:',
-  availableRequest4k:
-    'Your request for the following {mediaType} in 4K is now available:',
-  declinedRequest: 'Your request for the following {mediaType} was declined:',
-  declinedRequest4k:
-    'Your request for the following {mediaType} in 4K was declined:',
-  failedRequest:
-    'A request for the following {mediaType} failed to be added to {service}:',
-  failedRequest4k:
-    'A request for the following {mediaType} in 4K failed to be added to {service}:',
-  issueCreated:
-    'A new {issueType} has been reported by {userName} for the {mediaType} {subject}:',
-  issueComment:
-    '{userName} commented on the {issueType} for the {mediaType} {subject}:',
-  issueResolved:
-    'The {issueType} for the {mediaType} {subject} was marked as resolved by {userName}!',
-  issueReopened:
-    'The {issueType} for the {mediaType} {subject} was reopened by {userName}.',
-});
 
 class EmailAgent
   extends BaseAgent<NotificationAgentEmail>
@@ -92,19 +46,11 @@ class EmailAgent
     type: Notification,
     payload: NotificationPayload,
     recipientEmail: string,
-    recipientName?: string,
-    locale?: AvailableLocale
+    recipientName?: string
   ): EmailOptions | undefined {
-    const intl = getIntl(locale);
     const settings = getSettings();
     const { applicationUrl, applicationTitle } = settings.main;
     const { embedPoster } = settings.notifications.agents.email;
-    const { usePublicLogo } = settings.notifications.agents.email.options;
-    const logoUrl = usePublicLogo
-      ? PUBLIC_LOGO_URL
-      : applicationUrl
-        ? `${applicationUrl}/logo_full.svg`
-        : undefined;
 
     if (type === Notification.TEST_NOTIFICATION) {
       return {
@@ -116,7 +62,6 @@ class EmailAgent
           body: payload.message,
           applicationUrl,
           applicationTitle,
-          logoUrl,
           recipientName,
           recipientEmail,
         },
@@ -125,62 +70,86 @@ class EmailAgent
 
     const mediaType = payload.media
       ? payload.media.mediaType === MediaType.MOVIE
-        ? intl.formatMessage(globalMessages.movie)
-        : intl.formatMessage(globalMessages.series)
+        ? 'movie'
+        : payload.media.mediaType === MediaType.BOOK
+          ? 'book'
+          : 'series'
       : undefined;
-    const is4k = payload.request?.is4k;
+
+    const isAlt = payload.request?.isAlt;
 
     if (payload.request) {
       let body = '';
 
       switch (type) {
         case Notification.MEDIA_PENDING:
-          body = intl.formatMessage(
-            is4k ? messages.pendingRequest4k : messages.pendingRequest,
-            { mediaType }
-          );
+          body = `A new request for the following ${
+            isAlt
+              ? payload.media?.mediaType === MediaType.BOOK
+                ? 'audio'
+                : '4K '
+              : ''
+          }${mediaType} is pending approval:`;
           break;
         case Notification.MEDIA_AUTO_REQUESTED:
-          body = intl.formatMessage(
-            is4k ? messages.autoRequested4k : messages.autoRequested,
-            { mediaType }
-          );
+          body = `A new request for the following ${
+            isAlt
+              ? payload.media?.mediaType === MediaType.BOOK
+                ? 'audio'
+                : '4K '
+              : ''
+          }${mediaType} was automatically submitted:`;
           break;
         case Notification.MEDIA_APPROVED:
-          body = intl.formatMessage(
-            is4k ? messages.approvedRequest4k : messages.approvedRequest,
-            { mediaType }
-          );
+          body = `Your request for the following ${
+            isAlt
+              ? payload.media?.mediaType === MediaType.BOOK
+                ? 'audio'
+                : '4K '
+              : ''
+          }${mediaType} has been approved:`;
           break;
         case Notification.MEDIA_AUTO_APPROVED:
-          body = intl.formatMessage(
-            is4k ? messages.autoApproved4k : messages.autoApproved,
-            { mediaType }
-          );
+          body = `A new request for the following ${
+            isAlt
+              ? payload.media?.mediaType === MediaType.BOOK
+                ? 'audio'
+                : '4K '
+              : ''
+          }${mediaType} has been automatically approved:`;
           break;
         case Notification.MEDIA_AVAILABLE:
-          body = intl.formatMessage(
-            is4k ? messages.availableRequest4k : messages.availableRequest,
-            { mediaType }
-          );
+          body = `Your request for the following ${
+            isAlt
+              ? payload.media?.mediaType === MediaType.BOOK
+                ? 'audio'
+                : '4K '
+              : ''
+          }${mediaType} is now available:`;
           break;
         case Notification.MEDIA_DECLINED:
-          body = intl.formatMessage(
-            is4k ? messages.declinedRequest4k : messages.declinedRequest,
-            { mediaType }
-          );
+          body = `Your request for the following ${
+            isAlt
+              ? payload.media?.mediaType === MediaType.BOOK
+                ? 'audio'
+                : '4K '
+              : ''
+          }${mediaType} was declined:`;
           break;
         case Notification.MEDIA_FAILED:
-          body = intl.formatMessage(
-            is4k ? messages.failedRequest4k : messages.failedRequest,
-            {
-              mediaType,
-              service:
-                payload.media?.mediaType === MediaType.MOVIE
-                  ? 'Radarr'
-                  : 'Sonarr',
-            }
-          );
+          body = `A request for the following ${
+            isAlt
+              ? payload.media?.mediaType === MediaType.BOOK
+                ? 'audio'
+                : '4K '
+              : ''
+          }${mediaType} failed to be added to ${
+            payload.media?.mediaType === MediaType.MOVIE
+              ? 'Radarr'
+              : payload.media?.mediaType === MediaType.BOOK
+                ? 'Readarr'
+                : 'Sonarr'
+          }:`;
           break;
       }
 
@@ -205,7 +174,6 @@ class EmailAgent
             : undefined,
           applicationUrl,
           applicationTitle,
-          logoUrl,
           recipientName,
           recipientEmail,
         },
@@ -213,45 +181,23 @@ class EmailAgent
     } else if (payload.issue) {
       const issueType =
         payload.issue && payload.issue.issueType !== IssueType.OTHER
-          ? intl.formatMessage(messages.issueType, {
-              type: IssueTypeName[payload.issue.issueType].toLowerCase(),
-            })
-          : intl.formatMessage(messages.issue);
+          ? `${IssueTypeName[payload.issue.issueType].toLowerCase()} issue`
+          : 'issue';
 
       let body = '';
 
       switch (type) {
         case Notification.ISSUE_CREATED:
-          body = intl.formatMessage(messages.issueCreated, {
-            issueType,
-            userName: payload.issue.createdBy.displayName,
-            mediaType,
-            subject: payload.subject,
-          });
+          body = `A new ${issueType} has been reported by ${payload.issue.createdBy.displayName} for the ${mediaType} ${payload.subject}:`;
           break;
         case Notification.ISSUE_COMMENT:
-          body = intl.formatMessage(messages.issueComment, {
-            userName: payload.comment?.user.displayName,
-            issueType,
-            mediaType,
-            subject: payload.subject,
-          });
+          body = `${payload.comment?.user.displayName} commented on the ${issueType} for the ${mediaType} ${payload.subject}:`;
           break;
         case Notification.ISSUE_RESOLVED:
-          body = intl.formatMessage(messages.issueResolved, {
-            issueType,
-            userName: payload.issue.modifiedBy?.displayName,
-            mediaType,
-            subject: payload.subject,
-          });
+          body = `The ${issueType} for the ${mediaType} ${payload.subject} was marked as resolved by ${payload.issue.modifiedBy?.displayName}!`;
           break;
         case Notification.ISSUE_REOPENED:
-          body = intl.formatMessage(messages.issueReopened, {
-            issueType,
-            userName: payload.issue.modifiedBy?.displayName,
-            mediaType,
-            subject: payload.subject,
-          });
+          body = `The ${issueType} for the ${mediaType} ${payload.subject} was reopened by ${payload.issue.modifiedBy?.displayName}.`;
           break;
       }
 
@@ -274,7 +220,6 @@ class EmailAgent
             : undefined,
           applicationUrl,
           applicationTitle,
-          logoUrl,
           recipientName,
           recipientEmail,
         },
@@ -291,6 +236,8 @@ class EmailAgent
     if (payload.notifyUser) {
       if (
         !payload.notifyUser.settings ||
+        // Check if user has email notifications enabled and fallback to true if undefined
+        // since email should default to true
         (payload.notifyUser.settings.hasNotificationType(
           NotificationAgentKey.EMAIL,
           type
@@ -309,16 +256,13 @@ class EmailAgent
             this.getSettings(),
             payload.notifyUser.settings?.pgpKey
           );
-          if (
-            validator.isEmail(payload.notifyUser.email, { require_tld: false })
-          ) {
+          if (validator.isEmail(payload.notifyUser.email)) {
             await email.send(
               this.buildMessage(
                 type,
                 payload,
                 payload.notifyUser.email,
-                payload.notifyUser.displayName,
-                payload.notifyUser.settings?.locale as AvailableLocale
+                payload.notifyUser.displayName
               )
             );
           } else {
@@ -352,6 +296,8 @@ class EmailAgent
           .filter(
             (user) =>
               (!user.settings ||
+                // Check if user has email notifications enabled and fallback to true if undefined
+                // since email should default to true
                 (user.settings.hasNotificationType(
                   NotificationAgentKey.EMAIL,
                   type
@@ -372,15 +318,9 @@ class EmailAgent
                 this.getSettings(),
                 user.settings?.pgpKey
               );
-              if (validator.isEmail(user.email, { require_tld: false })) {
+              if (validator.isEmail(user.email)) {
                 await email.send(
-                  this.buildMessage(
-                    type,
-                    payload,
-                    user.email,
-                    user.displayName,
-                    user.settings?.locale as AvailableLocale
-                  )
+                  this.buildMessage(type, payload, user.email, user.displayName)
                 );
               } else {
                 logger.warn('Invalid email address provided for user', {

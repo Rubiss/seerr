@@ -231,6 +231,9 @@ class PlexScanner
       (media) => media.videoResolution === '4k'
     );
 
+    if (!mediaIds.tmdbId) {
+      throw new Error('TMDB ID is missing for this media!');
+    }
     await this.processMovie(mediaIds.tmdbId, {
       is4k: has4k && this.enable4kMovie,
       mediaAddedAt: new Date(plexitem.addedAt * 1000),
@@ -321,8 +324,8 @@ class PlexScanner
 
     const seasons = tvShow.seasons;
     const processableSeasons: ProcessableSeason[] = [];
-
     const settings = getSettings();
+
     const filteredSeasons = settings.main.enableSpecialEpisodes
       ? seasons
       : seasons.filter((sn) => sn.season_number !== 0);
@@ -367,16 +370,18 @@ class PlexScanner
       }
     }
 
-    await this.processShow(
-      mediaIds.tmdbId,
-      mediaIds.tvdbId ?? tvShow.external_ids.tvdb_id,
-      processableSeasons,
-      {
-        mediaAddedAt: new Date(metadata.addedAt * 1000),
-        ratingKey: ratingKey,
-        title: metadata.title,
-      }
-    );
+    if (mediaIds.tmdbId && mediaIds.tvdbId) {
+      await this.processShow(
+        mediaIds.tmdbId,
+        mediaIds.tvdbId ?? tvShow.external_ids.tvdb_id,
+        processableSeasons,
+        {
+          mediaAddedAt: new Date(metadata.addedAt * 1000),
+          ratingKey: ratingKey,
+          title: metadata.title,
+        }
+      );
+    }
   }
 
   private async getMediaIds(plexitem: PlexLibraryItem): Promise<MediaIds> {
@@ -426,13 +431,6 @@ class PlexScanner
           imdbId: mediaIds.imdbId,
         });
         mediaIds.tmdbId = tmdbMedia.id;
-      }
-
-      if (mediaIds.tvdbId && !mediaIds.tmdbId) {
-        const show = await this.tmdb.getShowByTvdbId({
-          tvdbId: mediaIds.tvdbId,
-        });
-        mediaIds.tmdbId = show.id;
       }
 
       // Cache GUIDs

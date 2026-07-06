@@ -1,4 +1,5 @@
 import RadarrAPI from '@server/api/servarr/radarr';
+import ReadarrAPI from '@server/api/servarr/readarr';
 import SonarrAPI from '@server/api/servarr/sonarr';
 import {
   MediaRequestStatus,
@@ -132,7 +133,7 @@ requestRoutes.get<Record<string, unknown>, RequestResultsResponse>(
           requestStatus: statusFilter,
         })
         .andWhere(
-          '((request.is4k = false AND media.status IN (:...mediaStatus)) OR (request.is4k = true AND media.status4k IN (:...mediaStatus)))',
+          '((request.isAlt = false AND media.status IN (:...mediaStatus)) OR (request.isAlt = true AND media.statusAlt IN (:...mediaStatus)))',
           {
             mediaStatus: mediaStatusFilter,
           }
@@ -171,6 +172,11 @@ requestRoutes.get<Record<string, unknown>, RequestResultsResponse>(
         case 'tv':
           query = query.andWhere('request.type = :type', {
             type: MediaType.TV,
+          });
+          break;
+        case 'book':
+          query = query.andWhere('request.type = :type', {
+            type: MediaType.BOOK,
           });
           break;
       }
@@ -213,6 +219,24 @@ requestRoutes.get<Record<string, unknown>, RequestResultsResponse>(
         })
       );
 
+      // get all quality profiles for every configured readarr server
+      const readarrServers = await Promise.all(
+        settings.readarr.map(async (readarrSetting) => {
+          const readarr = new ReadarrAPI({
+            apiKey: readarrSetting.apiKey,
+            url: ReadarrAPI.buildUrl(readarrSetting, '/api/v1'),
+          });
+
+          return {
+            id: readarrSetting.id,
+            profiles: await readarr.getProfiles().catch(() => undefined),
+            metadataProfiles: await readarr
+              .getMetadataProfiles()
+              .catch(() => undefined),
+          };
+        })
+      );
+
       // add profile names to the media requests, with undefined if not found
       let mappedRequests = requests.map((r) => {
         switch (r.type) {
@@ -223,15 +247,32 @@ requestRoutes.get<Record<string, unknown>, RequestResultsResponse>(
 
             return {
               ...r,
+              is4k: r.isAlt,
               profileName,
             };
           }
           case MediaType.TV: {
             return {
               ...r,
+              is4k: r.isAlt,
               profileName: sonarrServers
                 .find((serverr) => serverr.id === r.serverId)
                 ?.profiles?.find((profile) => profile.id === r.profileId)?.name,
+            };
+          }
+          case MediaType.BOOK: {
+            return {
+              ...r,
+              is4k: r.isAlt,
+              profileName: readarrServers
+                .find((serverr) => serverr.id === r.serverId)
+                ?.profiles?.find((profile) => profile.id === r.profileId)?.name,
+              metadataProfileName: readarrServers
+                .find((serverr) => serverr.id === r.serverId)
+                ?.metadataProfiles?.find(
+                  (metadataProfile) =>
+                    metadataProfile.id === r.metadataProfileId
+                )?.name,
             };
           }
         }
@@ -248,7 +289,7 @@ requestRoutes.get<Record<string, unknown>, RequestResultsResponse>(
                 canRemove: radarrServers.some(
                   (server) =>
                     server.id ===
-                    (r.is4k ? r.media.serviceId4k : r.media.serviceId)
+                    (r.isAlt ? r.media.serviceIdAlt : r.media.serviceId)
                 ),
               };
             }
@@ -259,8 +300,25 @@ requestRoutes.get<Record<string, unknown>, RequestResultsResponse>(
                 canRemove: sonarrServers.some(
                   (server) =>
                     server.id ===
-                    (r.is4k ? r.media.serviceId4k : r.media.serviceId)
+                    (r.isAlt ? r.media.serviceIdAlt : r.media.serviceId)
                 ),
+              };
+            }
+            case MediaType.BOOK: {
+              return {
+                ...r,
+                // check if the readarr server for this request is configured
+                canRemove: readarrServers.some(
+                  (server) =>
+                    server.id ===
+                    (r.isAlt ? r.media.serviceIdAlt : r.media.serviceId)
+                ),
+              };
+            }
+            default: {
+              return {
+                ...r,
+                canRemove: false,
               };
             }
           }
@@ -380,7 +438,7 @@ requestRoutes.get('/count', async (_req, res, next) => {
         requestStatus: MediaRequestStatus.APPROVED,
       })
       .andWhere(
-        '((request.is4k = false AND media.status != :availableStatus) OR (request.is4k = true AND media.status4k != :availableStatus))',
+        '((request.isAlt = false AND media.status != :availableStatus) OR (request.isAlt = true AND media.statusAlt != :availableStatus))',
         {
           availableStatus: MediaStatus.AVAILABLE,
         }
@@ -392,7 +450,7 @@ requestRoutes.get('/count', async (_req, res, next) => {
         requestStatus: MediaRequestStatus.APPROVED,
       })
       .andWhere(
-        '((request.is4k = false AND media.status = :availableStatus) OR (request.is4k = true AND media.status4k = :availableStatus))',
+        '((request.isAlt = false AND media.status = :availableStatus) OR (request.isAlt = true AND media.statusAlt = :availableStatus))',
         {
           availableStatus: MediaStatus.AVAILABLE,
         }
@@ -540,7 +598,7 @@ requestRoutes.put<{ requestId: string }>(
         const existingSeasons = media.requests
           .filter(
             (r) =>
-              r.is4k === request.is4k &&
+              r.isAlt === request.isAlt &&
               r.id !== request.id &&
               r.status !== MediaRequestStatus.DECLINED &&
               r.status !== MediaRequestStatus.COMPLETED
@@ -647,6 +705,7 @@ requestRoutes.post<{
       // this also triggers updating the parent media's status & sending to *arr
       request.status = MediaRequestStatus.APPROVED;
       request.modifiedBy = req.user;
+      request.updatedAt = new Date();
       await requestRepository.save(request);
 
       return res.status(200).json(request);
@@ -691,6 +750,7 @@ requestRoutes.post<{
 
       request.status = newStatus;
       request.modifiedBy = req.user;
+      request.updatedAt = new Date();
       await requestRepository.save(request);
 
       return res.status(200).json(request);

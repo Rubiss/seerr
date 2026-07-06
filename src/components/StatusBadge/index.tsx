@@ -24,27 +24,25 @@ const messages = defineMessages('components.StatusBadge', {
 interface StatusBadgeProps {
   status?: MediaStatus;
   downloadItem?: DownloadingItem[];
-  is4k?: boolean;
+  isAlt?: boolean;
   inProgress?: boolean;
   plexUrl?: string;
   serviceUrl?: string;
-  tmdbId?: number;
-  mediaType?: 'movie' | 'tv';
+  mediaId?: number;
+  mediaType?: 'movie' | 'tv' | 'book';
   title?: string | string[];
-  statusLabelOverride?: string;
 }
 
 const StatusBadge = ({
   status,
   downloadItem = [],
-  is4k = false,
+  isAlt = false,
   inProgress = false,
   plexUrl,
   serviceUrl,
-  tmdbId,
+  mediaId,
   mediaType,
   title,
-  statusLabelOverride,
 }: StatusBadgeProps) => {
   const intl = useIntl();
   const { hasPermission } = useUser();
@@ -61,9 +59,9 @@ const StatusBadge = ({
     mediaType &&
     plexUrl &&
     hasPermission(
-      is4k
+      isAlt
         ? [
-            Permission.REQUEST_4K,
+            Permission.REQUEST_ALT,
             mediaType === 'movie'
               ? Permission.REQUEST_4K_MOVIE
               : Permission.REQUEST_4K_TV,
@@ -78,7 +76,7 @@ const StatusBadge = ({
         type: 'or',
       }
     ) &&
-    (!is4k ||
+    (!isAlt ||
       (mediaType === 'movie'
         ? settings.currentSettings.movie4kEnabled
         : settings.currentSettings.series4kEnabled))
@@ -93,17 +91,26 @@ const StatusBadge = ({
             : 'Jellyfin',
     });
   } else if (hasPermission(Permission.MANAGE_REQUESTS)) {
-    if (mediaType && tmdbId) {
-      mediaLink = `/${mediaType}/${tmdbId}?manage=1`;
+    if (mediaType && mediaId) {
+      mediaLink = `/${mediaType}/${mediaId}?manage=1`;
       mediaLinkDescription = intl.formatMessage(messages.managemedia, {
         mediaType: intl.formatMessage(
-          mediaType === 'movie' ? globalMessages.movie : globalMessages.tvshow
+          mediaType === 'movie'
+            ? globalMessages.movie
+            : mediaType === 'book'
+              ? globalMessages.book
+              : globalMessages.tvshow
         ),
       });
     } else if (hasPermission(Permission.ADMIN) && serviceUrl) {
       mediaLink = serviceUrl;
       mediaLinkDescription = intl.formatMessage(messages.openinarr, {
-        arr: mediaType === 'movie' ? 'Radarr' : 'Sonarr',
+        arr:
+          mediaType === 'movie'
+            ? 'Radarr'
+            : mediaType === 'book'
+              ? 'Readarr'
+              : 'Sonarr',
       });
     }
   }
@@ -118,7 +125,7 @@ const StatusBadge = ({
       <DownloadBlock
         downloadItem={downloadItem[0]}
         title={Array.isArray(title) ? title[0] : title}
-        is4k={is4k}
+        isAlt={isAlt}
       />
     ) : (
       <ul>
@@ -130,7 +137,7 @@ const StatusBadge = ({
             <DownloadBlock
               downloadItem={status}
               title={Array.isArray(title) ? title[index] : title}
-              is4k={is4k}
+              isAlt={isAlt}
             />
           </li>
         ))}
@@ -139,12 +146,8 @@ const StatusBadge = ({
 
   const badgeDownloadProgress = (
     <div
-      className={`absolute left-0 top-0 z-10 flex h-full ${
-        status === MediaStatus.DELETED
-          ? 'bg-red-600/80'
-          : status === MediaStatus.PROCESSING
-            ? 'bg-indigo-500/80'
-            : 'bg-green-500/80'
+      className={`absolute left-0 top-0 z-10 flex h-full bg-opacity-80 ${
+        status === MediaStatus.PROCESSING ? 'bg-indigo-500' : 'bg-green-500'
       } transition-all duration-200 ease-in-out`}
       style={{
         width: `${
@@ -170,7 +173,8 @@ const StatusBadge = ({
             badgeType="success"
             href={mediaLink}
             className={`${
-              inProgress && 'relative !bg-gray-700/80 !px-0 hover:!bg-gray-700'
+              inProgress &&
+              'relative !bg-gray-700 !bg-opacity-80 !px-0 hover:!bg-gray-700'
             } overflow-hidden`}
           >
             {inProgress && badgeDownloadProgress}
@@ -181,7 +185,7 @@ const StatusBadge = ({
             >
               <span>
                 {intl.formatMessage(
-                  is4k ? messages.status4k : messages.status,
+                  isAlt ? messages.status4k : messages.status,
                   {
                     status: inProgress
                       ? intl.formatMessage(globalMessages.processing)
@@ -235,7 +239,8 @@ const StatusBadge = ({
             badgeType="success"
             href={mediaLink}
             className={`${
-              inProgress && 'relative !bg-gray-700/80 !px-0 hover:!bg-gray-700'
+              inProgress &&
+              'relative !bg-gray-700 !bg-opacity-80 !px-0 hover:!bg-gray-700'
             } overflow-hidden`}
           >
             {inProgress && badgeDownloadProgress}
@@ -246,7 +251,7 @@ const StatusBadge = ({
             >
               <span>
                 {intl.formatMessage(
-                  is4k ? messages.status4k : messages.status,
+                  isAlt ? messages.status4k : messages.status,
                   {
                     status: inProgress
                       ? intl.formatMessage(globalMessages.processing)
@@ -300,7 +305,8 @@ const StatusBadge = ({
             badgeType="primary"
             href={mediaLink}
             className={`${
-              inProgress && 'relative !bg-gray-700/80 !px-0 hover:!bg-gray-700'
+              inProgress &&
+              'relative !bg-gray-700 !bg-opacity-80 !px-0 hover:!bg-gray-700'
             } overflow-hidden`}
           >
             {inProgress && badgeDownloadProgress}
@@ -311,7 +317,7 @@ const StatusBadge = ({
             >
               <span>
                 {intl.formatMessage(
-                  is4k ? messages.status4k : messages.status,
+                  isAlt ? messages.status4k : messages.status,
                   {
                     status: inProgress
                       ? intl.formatMessage(globalMessages.processing)
@@ -354,7 +360,7 @@ const StatusBadge = ({
       return (
         <Tooltip content={mediaLinkDescription}>
           <Badge badgeType="warning" href={mediaLink}>
-            {intl.formatMessage(is4k ? messages.status4k : messages.status, {
+            {intl.formatMessage(isAlt ? messages.status4k : messages.status, {
               status: intl.formatMessage(globalMessages.pending),
             })}
           </Badge>
@@ -365,10 +371,8 @@ const StatusBadge = ({
       return (
         <Tooltip content={mediaLinkDescription}>
           <Badge badgeType="danger" href={mediaLink}>
-            {intl.formatMessage(is4k ? messages.status4k : messages.status, {
-              status:
-                statusLabelOverride ??
-                intl.formatMessage(globalMessages.blocklisted),
+            {intl.formatMessage(isAlt ? messages.status4k : messages.status, {
+              status: intl.formatMessage(globalMessages.blocklisted),
             })}
           </Badge>
         </Tooltip>
@@ -376,65 +380,11 @@ const StatusBadge = ({
 
     case MediaStatus.DELETED:
       return (
-        <Tooltip
-          content={inProgress ? tooltipContent : mediaLinkDescription}
-          className={`${
-            inProgress && 'hidden max-h-96 w-96 overflow-y-auto sm:block'
-          }`}
-          tooltipConfig={{
-            ...(inProgress && { interactive: true, delayHide: 100 }),
-          }}
-        >
-          <Badge
-            badgeType="danger"
-            href={mediaLink}
-            className={`${
-              inProgress && 'relative !bg-gray-700/80 !px-0 hover:!bg-gray-700'
-            } overflow-hidden`}
-          >
-            {inProgress && badgeDownloadProgress}
-            <div
-              className={`relative z-20 flex items-center ${
-                inProgress && 'px-2'
-              }`}
-            >
-              <span>
-                {intl.formatMessage(
-                  is4k ? messages.status4k : messages.status,
-                  {
-                    status: inProgress
-                      ? intl.formatMessage(globalMessages.processing)
-                      : intl.formatMessage(globalMessages.deleted),
-                  }
-                )}
-              </span>
-              {inProgress && (
-                <>
-                  {mediaType === 'tv' &&
-                    downloadItem[0].episode &&
-                    (downloadItem.length > 1 &&
-                    downloadItem.every(
-                      (item) =>
-                        item.downloadId &&
-                        item.downloadId === downloadItem[0].downloadId
-                    ) ? (
-                      <span className="ml-1">
-                        {intl.formatMessage(messages.seasonnumber, {
-                          seasonNumber: downloadItem[0].episode.seasonNumber,
-                        })}
-                      </span>
-                    ) : (
-                      <span className="ml-1">
-                        {intl.formatMessage(messages.seasonepisodenumber, {
-                          seasonNumber: downloadItem[0].episode.seasonNumber,
-                          episodeNumber: downloadItem[0].episode.episodeNumber,
-                        })}
-                      </span>
-                    ))}
-                  <Spinner className="ml-1 h-3 w-3" />
-                </>
-              )}
-            </div>
+        <Tooltip content={mediaLinkDescription}>
+          <Badge badgeType="danger">
+            {intl.formatMessage(isAlt ? messages.status4k : messages.status, {
+              status: intl.formatMessage(globalMessages.deleted),
+            })}
           </Badge>
         </Tooltip>
       );

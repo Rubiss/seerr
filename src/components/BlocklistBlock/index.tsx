@@ -8,7 +8,6 @@ import { useUser } from '@app/hooks/useUser';
 import globalMessages from '@app/i18n/globalMessages';
 import defineMessages from '@app/utils/defineMessages';
 import { CalendarIcon, TrashIcon, UserIcon } from '@heroicons/react/24/solid';
-import type { MediaType } from '@server/constants/media';
 import type { Blocklist } from '@server/entity/Blocklist';
 import axios from 'axios';
 import Link from 'next/link';
@@ -22,14 +21,14 @@ const messages = defineMessages('component.BlocklistBlock', {
 });
 
 interface BlocklistBlockProps {
-  tmdbId: number;
-  mediaType: MediaType;
+  mediaId: number;
+  mediaType: 'movie' | 'tv' | 'book';
   onUpdate?: () => void;
   onDelete?: () => void;
 }
 
 const BlocklistBlock = ({
-  tmdbId,
+  mediaId,
   mediaType,
   onUpdate,
   onDelete,
@@ -39,14 +38,14 @@ const BlocklistBlock = ({
   const [isUpdating, setIsUpdating] = useState(false);
   const { addToast } = useToasts();
   const { data } = useSWR<Blocklist>(
-    `/api/v1/blocklist/${tmdbId}?mediaType=${mediaType}`
+    `/api/v1/blocklist/${mediaType}/${mediaId}`
   );
 
-  const removeFromBlocklist = async (tmdbId: number, title?: string) => {
+  const removeFromBlocklist = async (mediaId: number, title?: string) => {
     setIsUpdating(true);
 
     try {
-      await axios.delete(`/api/v1/blocklist/${tmdbId}?mediaType=${mediaType}`);
+      await axios.delete(`/api/v1/blocklist/${mediaType}/${mediaId}`);
 
       addToast(
         <span>
@@ -118,7 +117,7 @@ const BlocklistBlock = ({
           >
             <Button
               buttonType="danger"
-              onClick={() => removeFromBlocklist(data.tmdbId, data.title)}
+              onClick={() => removeFromBlocklist(data.externalId, data.title)}
               disabled={isUpdating}
             >
               <TrashIcon className="icon-sm" />

@@ -12,7 +12,6 @@ import { Permission } from '@server/lib/permissions';
 import { getSettings } from '@server/lib/settings';
 import logger from '@server/logger';
 import { checkUser, isAuthenticated } from '@server/middleware/auth';
-import deprecatedRoute from '@server/middleware/deprecation';
 import { mapProductionCompany } from '@server/models/Movie';
 import { mapNetwork } from '@server/models/Tv';
 import { mapWatchProviderDetails } from '@server/models/common';
@@ -29,7 +28,9 @@ import restartFlag from '@server/utils/restartFlag';
 import { isPerson } from '@server/utils/typeHelpers';
 import { Router } from 'express';
 import authRoutes from './auth';
+import authorRoutes from './author';
 import blocklistRoutes from './blocklist';
+import bookRoutes from './book';
 import collectionRoutes from './collection';
 import discoverRoutes, { createTmdbWithRegionLanguage } from './discover';
 import issueRoutes from './issue';
@@ -39,6 +40,7 @@ import movieRoutes from './movie';
 import personRoutes from './person';
 import requestRoutes from './request';
 import searchRoutes from './search';
+import seriesRoutes from './series';
 import serviceRoutes from './service';
 import tvRoutes from './tv';
 import user from './user';
@@ -153,19 +155,12 @@ router.use('/discover', isAuthenticated(), discoverRoutes);
 router.use('/request', isAuthenticated(), requestRoutes);
 router.use('/watchlist', isAuthenticated(), watchlistRoutes);
 router.use('/blocklist', isAuthenticated(), blocklistRoutes);
-router.use(
-  '/blacklist',
-  isAuthenticated(),
-  deprecatedRoute({
-    oldPath: '/api/v1/blacklist',
-    newPath: '/api/v1/blocklist',
-    sunsetDate: '2026-06-01',
-  }),
-  blocklistRoutes
-);
 router.use('/movie', isAuthenticated(), movieRoutes);
 router.use('/tv', isAuthenticated(), tvRoutes);
 router.use('/media', isAuthenticated(), mediaRoutes);
+router.use('/book', isAuthenticated(), bookRoutes);
+router.use('/author', isAuthenticated(), authorRoutes);
+router.use('/series', isAuthenticated(), seriesRoutes);
 router.use('/person', isAuthenticated(), personRoutes);
 router.use('/collection', isAuthenticated(), collectionRoutes);
 router.use('/service', isAuthenticated(), serviceRoutes);

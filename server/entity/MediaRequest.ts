@@ -1,3 +1,4 @@
+import Hardcover from '@server/api/hardcover';
 import TheMovieDb from '@server/api/themoviedb';
 import { ANIME_KEYWORD_ID } from '@server/api/themoviedb/constants';
 import type { TmdbKeyword } from '@server/api/themoviedb/interfaces';
@@ -13,7 +14,8 @@ import notificationManager, { Notification } from '@server/lib/notifications';
 import { Permission } from '@server/lib/permissions';
 import { getSettings } from '@server/lib/settings';
 import logger from '@server/logger';
-import { DbAwareColumn, resolveDbType } from '@server/utils/DbColumnHelper';
+import { DbAwareColumn } from '@server/utils/DbColumnHelper';
+import { isBookDetails } from '@server/utils/typeHelpers';
 import { truncate } from 'lodash';
 import {
   AfterInsert,
@@ -21,12 +23,10 @@ import {
   AfterUpdate,
   Column,
   Entity,
-  Index,
   ManyToOne,
   OneToMany,
   PrimaryGeneratedColumn,
   RelationCount,
-  UpdateDateColumn,
 } from 'typeorm';
 import Media from './Media';
 import SeasonRequest from './SeasonRequest';
@@ -50,6 +50,7 @@ export class MediaRequest {
     options: MediaRequestOptions = {}
   ): Promise<MediaRequest> {
     const tmdb = new TheMovieDb();
+    const hardcover = new Hardcover();
     const mediaRepository = getRepository(Media);
     const requestRepository = getRepository(MediaRequest);
     const userRepository = getRepository(User);
@@ -80,8 +81,8 @@ export class MediaRequest {
     if (
       requestBody.mediaType === MediaType.MOVIE &&
       !requestUser.hasPermission(
-        requestBody.is4k
-          ? [Permission.REQUEST_4K, Permission.REQUEST_4K_MOVIE]
+        requestBody.isAlt
+          ? [Permission.REQUEST_ALT, Permission.REQUEST_4K_MOVIE]
           : [Permission.REQUEST, Permission.REQUEST_MOVIE],
         {
           type: 'or',
@@ -90,14 +91,14 @@ export class MediaRequest {
     ) {
       throw new RequestPermissionError(
         `You do not have permission to make ${
-          requestBody.is4k ? '4K ' : ''
+          requestBody.isAlt ? '4K ' : ''
         }movie requests.`
       );
     } else if (
       requestBody.mediaType === MediaType.TV &&
       !requestUser.hasPermission(
-        requestBody.is4k
-          ? [Permission.REQUEST_4K, Permission.REQUEST_4K_TV]
+        requestBody.isAlt
+          ? [Permission.REQUEST_ALT, Permission.REQUEST_4K_TV]
           : [Permission.REQUEST, Permission.REQUEST_TV],
         {
           type: 'or',
@@ -106,27 +107,75 @@ export class MediaRequest {
     ) {
       throw new RequestPermissionError(
         `You do not have permission to make ${
-          requestBody.is4k ? '4K ' : ''
+          requestBody.isAlt ? '4K ' : ''
         }series requests.`
+      );
+    } else if (
+      requestBody.mediaType === MediaType.BOOK &&
+      !requestUser.hasPermission(
+        requestBody.isAlt
+          ? [Permission.REQUEST_ALT, Permission.REQUEST_AUDIO_BOOK]
+          : [Permission.REQUEST, Permission.REQUEST_BOOK],
+        {
+          type: 'or',
+        }
+      )
+    ) {
+      throw new RequestPermissionError(
+        `You do not have permission to make ${
+          requestBody.isAlt ? 'audio' : ''
+        }book requests.`
       );
     }
 
     const quotas = await requestUser.getQuota();
 
-    if (requestBody.mediaType === MediaType.MOVIE && quotas.movie.restricted) {
-      throw new QuotaRestrictedError('Movie Quota exceeded.');
-    } else if (requestBody.mediaType === MediaType.TV && quotas.tv.restricted) {
-      throw new QuotaRestrictedError('Series Quota exceeded.');
+    const canBypassQuota = user.hasPermission(Permission.MANAGE_REQUESTS);
+    const quotaLimit =
+      requestBody.mediaType === MediaType.MOVIE
+        ? quotas.movie.limit
+        : requestBody.mediaType === MediaType.BOOK
+          ? quotas.book.limit
+          : quotas.tv.limit;
+    const ignoreQuota =
+      requestBody.ignoreQuota === true &&
+      canBypassQuota &&
+      (quotaLimit ?? 0) > 0;
+
+    if (!ignoreQuota) {
+      if (requestBody.ignoreQuota && !canBypassQuota) {
+        throw new RequestPermissionError(
+          'You do not have permission to bypass user quota limits.'
+        );
+      } else if (
+        requestBody.mediaType === MediaType.MOVIE &&
+        quotas.movie.restricted
+      ) {
+        throw new QuotaRestrictedError('Movie Quota exceeded.');
+      } else if (
+        requestBody.mediaType === MediaType.TV &&
+        quotas.tv.restricted
+      ) {
+        throw new QuotaRestrictedError('Series Quota exceeded.');
+      } else if (
+        requestBody.mediaType === MediaType.BOOK &&
+        quotas.book.restricted
+      ) {
+        throw new QuotaRestrictedError('Book Quota exceeded.');
+      }
     }
 
-    const tmdbMedia =
+    const mediaDetails =
       requestBody.mediaType === MediaType.MOVIE
         ? await tmdb.getMovie({ movieId: requestBody.mediaId })
-        : await tmdb.getTvShow({ tvId: requestBody.mediaId });
+        : requestBody.mediaType === MediaType.BOOK
+          ? await hardcover.getBook(requestBody.mediaId)
+          : await tmdb.getTvShow({ tvId: requestBody.mediaId });
 
+    const key = requestBody.mediaType === 'book' ? 'hcId' : 'tmdbId';
     let media = await mediaRepository.findOne({
       where: {
-        tmdbId: requestBody.mediaId,
+        [key]: requestBody.mediaId,
         mediaType: requestBody.mediaType,
       },
       relations: ['requests'],
@@ -134,16 +183,20 @@ export class MediaRequest {
 
     if (!media) {
       media = new Media({
-        tmdbId: tmdbMedia.id,
-        tvdbId: requestBody.tvdbId ?? tmdbMedia.external_ids.tvdb_id,
-        status: !requestBody.is4k ? MediaStatus.PENDING : MediaStatus.UNKNOWN,
-        status4k: requestBody.is4k ? MediaStatus.PENDING : MediaStatus.UNKNOWN,
+        [key]: mediaDetails.id,
+        ...(!isBookDetails(mediaDetails) && {
+          tvdbId: requestBody.tvdbId ?? mediaDetails.external_ids.tvdb_id,
+        }),
+        status: !requestBody.isAlt ? MediaStatus.PENDING : MediaStatus.UNKNOWN,
+        statusAlt: requestBody.isAlt
+          ? MediaStatus.PENDING
+          : MediaStatus.UNKNOWN,
         mediaType: requestBody.mediaType,
       });
     } else {
       if (media.status === MediaStatus.BLOCKLISTED) {
         logger.warn('Request for media blocked due to being blocklisted', {
-          tmdbId: tmdbMedia.id,
+          [key]: mediaDetails.id,
           mediaType: requestBody.mediaType,
           label: 'Media Request',
         });
@@ -152,44 +205,49 @@ export class MediaRequest {
       }
 
       if (
-        (media.status === MediaStatus.UNKNOWN ||
-          media.status === MediaStatus.DELETED) &&
-        !requestBody.is4k
+        (requestBody.mediaType === MediaType.BOOK ||
+          requestBody.mediaType === MediaType.MOVIE ||
+          requestBody.mediaType === MediaType.TV) &&
+        media.status === MediaStatus.UNKNOWN &&
+        !requestBody.isAlt
       ) {
         media.status = MediaStatus.PENDING;
       }
 
       if (
-        (media.status4k === MediaStatus.UNKNOWN ||
-          media.status4k === MediaStatus.DELETED) &&
-        requestBody.is4k
+        (requestBody.mediaType === MediaType.BOOK ||
+          requestBody.mediaType === MediaType.MOVIE ||
+          requestBody.mediaType === MediaType.TV) &&
+        media.statusAlt === MediaStatus.UNKNOWN &&
+        requestBody.isAlt
       ) {
-        media.status4k = MediaStatus.PENDING;
+        media.statusAlt = MediaStatus.PENDING;
       }
     }
 
     const existing = await requestRepository
       .createQueryBuilder('request')
-      .leftJoinAndSelect('request.media', 'media')
+      .leftJoin('request.media', 'media')
       .leftJoinAndSelect('request.requestedBy', 'user')
-      .where('request.is4k = :is4k', { is4k: requestBody.is4k })
-      .andWhere('media.tmdbId = :tmdbId', { tmdbId: tmdbMedia.id })
+      .where('request.isAlt = :isAlt', { isAlt: requestBody.isAlt })
+      .andWhere(`media.${key} = :mediaId`, { mediaId: mediaDetails.id })
       .andWhere('media.mediaType = :mediaType', {
         mediaType: requestBody.mediaType,
       })
       .getMany();
 
     if (existing && existing.length > 0) {
-      // If there is an existing movie request that isn't declined, don't allow a new one.
+      // If there is an existing movie/book request that isn't declined, don't allow a new one.
       if (
-        requestBody.mediaType === MediaType.MOVIE &&
+        (requestBody.mediaType === MediaType.MOVIE ||
+          requestBody.mediaType === MediaType.BOOK) &&
         existing[0].status !== MediaRequestStatus.DECLINED &&
         existing[0].status !== MediaRequestStatus.COMPLETED
       ) {
         logger.warn('Duplicate request for media blocked', {
-          tmdbId: tmdbMedia.id,
+          [key]: mediaDetails.id,
           mediaType: requestBody.mediaType,
-          is4k: requestBody.is4k,
+          isAlt: requestBody.isAlt,
           label: 'Media Request',
         });
 
@@ -200,13 +258,9 @@ export class MediaRequest {
 
       // If an existing auto-request for this media exists from the same user,
       // don't allow a new one.
-      const statusKey = requestBody.is4k ? 'status4k' : 'status';
       if (
         existing.find(
-          (r) =>
-            r.requestedBy.id === requestUser.id &&
-            r.isAutoRequest &&
-            r.media?.[statusKey] !== MediaStatus.DELETED
+          (r) => r.requestedBy.id === requestUser.id && r.isAutoRequest
         )
       ) {
         throw new DuplicateMediaRequestError(
@@ -223,42 +277,30 @@ export class MediaRequest {
     let rootFolder = requestBody.rootFolder;
     let profileId = requestBody.profileId;
     let tags = requestBody.tags;
+    let metadataProfileId = requestBody.metadataProfileId;
 
     if (useOverrides) {
-      const defaultRadarrId = requestBody.is4k
+      const defaultRadarrId = requestBody.isAlt
         ? settings.radarr.findIndex((r) => r.is4k && r.isDefault)
         : settings.radarr.findIndex((r) => !r.is4k && r.isDefault);
-      const defaultSonarrId = requestBody.is4k
+      const defaultSonarrId = requestBody.isAlt
         ? settings.sonarr.findIndex((s) => s.is4k && s.isDefault)
         : settings.sonarr.findIndex((s) => !s.is4k && s.isDefault);
+      const defaultReadarrId = requestBody.isAlt
+        ? settings.readarr.findIndex((r) => r.isAudio && r.isDefault)
+        : settings.readarr.findIndex((r) => !r.isAudio && r.isDefault);
 
       const overrideRuleRepository = getRepository(OverrideRule);
       const overrideRules = await overrideRuleRepository.find({
         where:
           requestBody.mediaType === MediaType.MOVIE
             ? { radarrServiceId: defaultRadarrId }
-            : { sonarrServiceId: defaultSonarrId },
+            : requestBody.mediaType === MediaType.BOOK
+              ? { readarrServiceId: defaultReadarrId }
+              : { sonarrServiceId: defaultSonarrId },
       });
 
       const appliedOverrideRules = overrideRules.filter((rule) => {
-        const hasAnimeKeyword =
-          'results' in tmdbMedia.keywords &&
-          tmdbMedia.keywords.results.some(
-            (keyword: TmdbKeyword) => keyword.id === ANIME_KEYWORD_ID
-          );
-
-        // Skip override rules if the media is an anime TV show as anime TV
-        // is handled by default and override rules do not explicitly include
-        // the anime keyword
-        if (
-          requestBody.mediaType === MediaType.TV &&
-          hasAnimeKeyword &&
-          (!rule.keywords ||
-            !rule.keywords.split(',').map(Number).includes(ANIME_KEYWORD_ID))
-        ) {
-          return false;
-        }
-
         if (
           rule.users &&
           !rule.users
@@ -267,43 +309,67 @@ export class MediaRequest {
         ) {
           return false;
         }
-        if (
-          rule.genre &&
-          !rule.genre
-            .split(',')
-            .some((genreId) =>
-              tmdbMedia.genres
-                .map((genre) => genre.id)
-                .includes(Number(genreId))
-            )
-        ) {
-          return false;
-        }
-        if (
-          rule.language &&
-          !rule.language
-            .split('|')
-            .some((languageId) => languageId === tmdbMedia.original_language)
-        ) {
-          return false;
-        }
-        if (
-          rule.keywords &&
-          !rule.keywords.split(',').some((keywordId) => {
-            let keywordList: TmdbKeyword[] = [];
 
-            if ('keywords' in tmdbMedia.keywords) {
-              keywordList = tmdbMedia.keywords.keywords;
-            } else if ('results' in tmdbMedia.keywords) {
-              keywordList = tmdbMedia.keywords.results;
-            }
+        if (!isBookDetails(mediaDetails)) {
+          const hasAnimeKeyword =
+            'results' in mediaDetails.keywords &&
+            mediaDetails.keywords.results.some(
+              (keyword: TmdbKeyword) => keyword.id === ANIME_KEYWORD_ID
+            );
 
-            return keywordList
-              .map((keyword: TmdbKeyword) => keyword.id)
-              .includes(Number(keywordId));
-          })
-        ) {
-          return false;
+          // Skip override rules if the media is an anime TV show as anime TV
+          // is handled by default and override rules do not explicitly include
+          // the anime keyword
+          if (
+            requestBody.mediaType === MediaType.TV &&
+            hasAnimeKeyword &&
+            (!rule.keywords ||
+              !rule.keywords.split(',').map(Number).includes(ANIME_KEYWORD_ID))
+          ) {
+            return false;
+          }
+
+          if (
+            rule.genre &&
+            !rule.genre
+              .split(',')
+              .some((genreId) =>
+                mediaDetails.genres
+                  .map((genre) => genre.id)
+                  .includes(Number(genreId))
+              )
+          ) {
+            return false;
+          }
+
+          if (
+            rule.language &&
+            !rule.language
+              .split('|')
+              .some(
+                (languageId) => languageId === mediaDetails.original_language
+              )
+          ) {
+            return false;
+          }
+          if (
+            rule.keywords &&
+            !rule.keywords.split(',').some((keywordId) => {
+              let keywordList: TmdbKeyword[] = [];
+
+              if ('keywords' in mediaDetails.keywords) {
+                keywordList = mediaDetails.keywords.keywords;
+              } else if ('results' in mediaDetails.keywords) {
+                keywordList = mediaDetails.keywords.results;
+              }
+
+              return keywordList
+                .map((keyword: TmdbKeyword) => keyword.id)
+                .includes(Number(keywordId));
+            })
+          ) {
+            return false;
+          }
         }
         return true;
       });
@@ -326,6 +392,12 @@ export class MediaRequest {
         }
         if (prioritizedRule.profileId) {
           profileId = prioritizedRule.profileId;
+        }
+        if (
+          prioritizedRule.metadataProfileId &&
+          requestBody.mediaType === MediaType.BOOK
+        ) {
+          metadataProfileId = prioritizedRule.metadataProfileId;
         }
         if (prioritizedRule.tags) {
           tags = [
@@ -353,10 +425,10 @@ export class MediaRequest {
         // If the user is an admin or has the "auto approve" permission, automatically approve the request
         status: user.hasPermission(
           [
-            requestBody.is4k
-              ? Permission.AUTO_APPROVE_4K
+            requestBody.isAlt
+              ? Permission.AUTO_APPROVE_ALT
               : Permission.AUTO_APPROVE,
-            requestBody.is4k
+            requestBody.isAlt
               ? Permission.AUTO_APPROVE_4K_MOVIE
               : Permission.AUTO_APPROVE_MOVIE,
             Permission.MANAGE_REQUESTS,
@@ -367,10 +439,10 @@ export class MediaRequest {
           : MediaRequestStatus.PENDING,
         modifiedBy: user.hasPermission(
           [
-            requestBody.is4k
-              ? Permission.AUTO_APPROVE_4K
+            requestBody.isAlt
+              ? Permission.AUTO_APPROVE_ALT
               : Permission.AUTO_APPROVE,
-            requestBody.is4k
+            requestBody.isAlt
               ? Permission.AUTO_APPROVE_4K_MOVIE
               : Permission.AUTO_APPROVE_MOVIE,
             Permission.MANAGE_REQUESTS,
@@ -379,18 +451,67 @@ export class MediaRequest {
         )
           ? user
           : undefined,
-        is4k: requestBody.is4k,
+        isAlt: requestBody.isAlt,
         serverId: requestBody.serverId,
         profileId: profileId,
         rootFolder: rootFolder,
         tags: tags,
         isAutoRequest: options.isAutoRequest ?? false,
+        ignoreQuota,
+      });
+
+      await requestRepository.save(request);
+      return request;
+    } else if (requestBody.mediaType === MediaType.BOOK) {
+      await mediaRepository.save(media);
+
+      const request = new MediaRequest({
+        type: MediaType.BOOK,
+        media,
+        requestedBy: requestUser,
+        // If the user is an admin or has the "auto approve" permission, automatically approve the request
+        status: user.hasPermission(
+          [
+            requestBody.isAlt
+              ? Permission.AUTO_APPROVE_ALT
+              : Permission.AUTO_APPROVE,
+            requestBody.isAlt
+              ? Permission.AUTO_APPROVE_AUDIO_BOOK
+              : Permission.AUTO_APPROVE_BOOK,
+            Permission.MANAGE_REQUESTS,
+          ],
+          { type: 'or' }
+        )
+          ? MediaRequestStatus.APPROVED
+          : MediaRequestStatus.PENDING,
+        modifiedBy: user.hasPermission(
+          [
+            requestBody.isAlt
+              ? Permission.AUTO_APPROVE_ALT
+              : Permission.AUTO_APPROVE,
+            requestBody.isAlt
+              ? Permission.AUTO_APPROVE_AUDIO_BOOK
+              : Permission.AUTO_APPROVE_BOOK,
+            Permission.MANAGE_REQUESTS,
+          ],
+          { type: 'or' }
+        )
+          ? user
+          : undefined,
+        isAlt: requestBody.isAlt,
+        serverId: requestBody.serverId,
+        profileId: profileId,
+        metadataProfileId: metadataProfileId,
+        rootFolder: rootFolder,
+        tags: tags,
+        isAutoRequest: options.isAutoRequest ?? false,
+        ignoreQuota,
       });
 
       await requestRepository.save(request);
       return request;
     } else {
-      const tmdbMediaShow = tmdbMedia as Awaited<
+      const tmdbMediaShow = mediaDetails as Awaited<
         ReturnType<typeof tmdb.getTvShow>
       >;
       let requestedSeasons =
@@ -412,7 +533,7 @@ export class MediaRequest {
         existingSeasons = media.requests
           .filter(
             (request) =>
-              request.is4k === requestBody.is4k &&
+              request.isAlt === requestBody.isAlt &&
               request.status !== MediaRequestStatus.DECLINED &&
               request.status !== MediaRequestStatus.COMPLETED
           )
@@ -432,9 +553,9 @@ export class MediaRequest {
           ...media.seasons
             .filter(
               (season) =>
-                season[requestBody.is4k ? 'status4k' : 'status'] !==
+                season[requestBody.isAlt ? 'status4k' : 'status'] !==
                   MediaStatus.UNKNOWN &&
-                season[requestBody.is4k ? 'status4k' : 'status'] !==
+                season[requestBody.isAlt ? 'status4k' : 'status'] !==
                   MediaStatus.DELETED
             )
             .map((season) => season.seasonNumber),
@@ -448,6 +569,7 @@ export class MediaRequest {
       if (finalSeasons.length === 0) {
         throw new NoSeasonsAvailableError('No seasons available to request');
       } else if (
+        !ignoreQuota &&
         quotas.tv.limit &&
         finalSeasons.length > (quotas.tv.remaining ?? 0)
       ) {
@@ -463,10 +585,10 @@ export class MediaRequest {
         // If the user is an admin or has the "auto approve" permission, automatically approve the request
         status: user.hasPermission(
           [
-            requestBody.is4k
-              ? Permission.AUTO_APPROVE_4K
+            requestBody.isAlt
+              ? Permission.AUTO_APPROVE_ALT
               : Permission.AUTO_APPROVE,
-            requestBody.is4k
+            requestBody.isAlt
               ? Permission.AUTO_APPROVE_4K_TV
               : Permission.AUTO_APPROVE_TV,
             Permission.MANAGE_REQUESTS,
@@ -477,10 +599,10 @@ export class MediaRequest {
           : MediaRequestStatus.PENDING,
         modifiedBy: user.hasPermission(
           [
-            requestBody.is4k
-              ? Permission.AUTO_APPROVE_4K
+            requestBody.isAlt
+              ? Permission.AUTO_APPROVE_ALT
               : Permission.AUTO_APPROVE,
-            requestBody.is4k
+            requestBody.isAlt
               ? Permission.AUTO_APPROVE_4K_TV
               : Permission.AUTO_APPROVE_TV,
             Permission.MANAGE_REQUESTS,
@@ -489,7 +611,7 @@ export class MediaRequest {
         )
           ? user
           : undefined,
-        is4k: requestBody.is4k,
+        isAlt: requestBody.isAlt,
         serverId: requestBody.serverId,
         profileId: profileId,
         rootFolder: rootFolder,
@@ -501,10 +623,10 @@ export class MediaRequest {
               seasonNumber: sn,
               status: user.hasPermission(
                 [
-                  requestBody.is4k
-                    ? Permission.AUTO_APPROVE_4K
+                  requestBody.isAlt
+                    ? Permission.AUTO_APPROVE_ALT
                     : Permission.AUTO_APPROVE,
-                  requestBody.is4k
+                  requestBody.isAlt
                     ? Permission.AUTO_APPROVE_4K_TV
                     : Permission.AUTO_APPROVE_TV,
                   Permission.MANAGE_REQUESTS,
@@ -516,6 +638,7 @@ export class MediaRequest {
             })
         ),
         isAutoRequest: options.isAutoRequest ?? false,
+        ignoreQuota,
       });
 
       await requestRepository.save(request);
@@ -527,37 +650,35 @@ export class MediaRequest {
   public id: number;
 
   @Column({ type: 'integer' })
-  @Index()
   public status: MediaRequestStatus;
 
   @ManyToOne(() => Media, (media) => media.requests, {
     eager: true,
     onDelete: 'CASCADE',
   })
-  @Index()
   public media: Media;
 
   @ManyToOne(() => User, (user) => user.requests, {
     eager: true,
     onDelete: 'CASCADE',
   })
-  @Index()
   public requestedBy: User;
 
   @ManyToOne(() => User, {
     nullable: true,
+    cascade: true,
     eager: true,
     onDelete: 'SET NULL',
   })
-  @Index()
   public modifiedBy?: User;
 
   @DbAwareColumn({ type: 'datetime', default: () => 'CURRENT_TIMESTAMP' })
   public createdAt: Date;
 
-  @UpdateDateColumn({
-    type: resolveDbType('datetime'),
+  @DbAwareColumn({
+    type: 'datetime',
     default: () => 'CURRENT_TIMESTAMP',
+    onUpdate: 'CURRENT_TIMESTAMP',
   })
   public updatedAt: Date;
 
@@ -574,13 +695,24 @@ export class MediaRequest {
   public seasons: SeasonRequest[];
 
   @Column({ default: false })
-  public is4k: boolean;
+  public isAlt: boolean;
+
+  public get is4k(): boolean {
+    return this.isAlt;
+  }
+
+  public set is4k(value: boolean) {
+    this.isAlt = value;
+  }
 
   @Column({ nullable: true })
   public serverId: number;
 
   @Column({ nullable: true })
   public profileId: number;
+
+  @Column({ nullable: true })
+  public metadataProfileId: number;
 
   @Column({ nullable: true })
   public rootFolder: string;
@@ -621,6 +753,9 @@ export class MediaRequest {
 
   @Column({ default: false })
   public isAutoRequest: boolean;
+
+  @Column({ default: false })
+  public ignoreQuota: boolean;
 
   constructor(init?: Partial<MediaRequest>) {
     Object.assign(this, init);
@@ -680,17 +815,11 @@ export class MediaRequest {
       }
 
       if (
-        this.status === MediaRequestStatus.APPROVED &&
-        media[this.is4k ? 'status4k' : 'status'] === MediaStatus.AVAILABLE
+        media[this.isAlt ? 'statusAlt' : 'status'] === MediaStatus.AVAILABLE
       ) {
-        logger.info(
-          'Media is already available. Sending availability notification instead of approval.',
+        logger.warn(
+          'Media became available before request was approved. Skipping approval notification',
           { label: 'Media Request', requestId: this.id, mediaId: this.media.id }
-        );
-        MediaRequest.sendNotification(
-          this,
-          media,
-          Notification.MEDIA_AVAILABLE
         );
         return;
       }
@@ -739,47 +868,94 @@ export class MediaRequest {
     type: Notification
   ) {
     const tmdb = new TheMovieDb();
+    const hardcover = new Hardcover();
 
     try {
-      const mediaType = entity.type === MediaType.MOVIE ? 'Movie' : 'Series';
+      const mediaType =
+        entity.type === MediaType.MOVIE
+          ? 'Movie'
+          : entity.type === MediaType.TV
+            ? 'Series'
+            : 'Book';
       let event: string | undefined;
       let notifyAdmin = true;
       let notifySystem = true;
 
       switch (type) {
-        case Notification.MEDIA_AVAILABLE:
-          event = `${entity.is4k ? '4K ' : ''}${mediaType} Now Available`;
-          notifyAdmin = false;
-          break;
         case Notification.MEDIA_APPROVED:
-          event = `${entity.is4k ? '4K ' : ''}${mediaType} Request Approved`;
+          event = `${
+            entity.isAlt
+              ? entity.type === MediaType.BOOK
+                ? 'Audio'
+                : '4K '
+              : ''
+          }${mediaType} Request Approved`;
           notifyAdmin = false;
           break;
         case Notification.MEDIA_DECLINED:
-          event = `${entity.is4k ? '4K ' : ''}${mediaType} Request Declined`;
+          event = `${
+            entity.isAlt
+              ? entity.type === MediaType.BOOK
+                ? 'Audio'
+                : '4K '
+              : ''
+          }${mediaType} Request Declined`;
           notifyAdmin = false;
           break;
         case Notification.MEDIA_PENDING:
-          event = `New ${entity.is4k ? '4K ' : ''}${mediaType} Request`;
+          event = `New ${
+            entity.isAlt
+              ? entity.type === MediaType.BOOK
+                ? 'Audio'
+                : '4K '
+              : ''
+          }${mediaType} Request`;
           break;
         case Notification.MEDIA_AUTO_REQUESTED:
           event = `${
-            entity.is4k ? '4K ' : ''
+            entity.isAlt
+              ? entity.type === MediaType.BOOK
+                ? 'Audio '
+                : '4K '
+              : ''
           }${mediaType} Request Automatically Submitted`;
           notifyAdmin = false;
           notifySystem = false;
           break;
         case Notification.MEDIA_AUTO_APPROVED:
           event = `${
-            entity.is4k ? '4K ' : ''
+            entity.isAlt
+              ? entity.type === MediaType.BOOK
+                ? 'Audio'
+                : '4K '
+              : ''
           }${mediaType} Request Automatically Approved`;
           break;
+        case Notification.MEDIA_AVAILABLE:
+          event = `${
+            entity.isAlt
+              ? entity.type === MediaType.BOOK
+                ? 'Audio '
+                : '4K '
+              : ''
+          }${mediaType} Now Available`;
+          notifyAdmin = false;
+          break;
         case Notification.MEDIA_FAILED:
-          event = `${entity.is4k ? '4K ' : ''}${mediaType} Request Failed`;
+          event = `${
+            entity.isAlt
+              ? entity.type === MediaType.BOOK
+                ? 'Audio '
+                : '4K '
+              : ''
+          }${mediaType} Request Failed`;
           break;
       }
 
       if (entity.type === MediaType.MOVIE) {
+        if (!media.tmdbId) {
+          return;
+        }
         const movie = await tmdb.getMovie({ movieId: media.tmdbId });
         notificationManager.sendNotification(type, {
           media,
@@ -799,6 +975,9 @@ export class MediaRequest {
           image: `https://image.tmdb.org/t/p/w600_and_h900_bestv2${movie.poster_path}`,
         });
       } else if (entity.type === MediaType.TV) {
+        if (!media.tmdbId) {
+          return;
+        }
         const tv = await tmdb.getTvShow({ tvId: media.tmdbId });
         notificationManager.sendNotification(type, {
           media,
@@ -824,6 +1003,30 @@ export class MediaRequest {
                 .join(', '),
             },
           ],
+        });
+      } else if (entity.type === MediaType.BOOK) {
+        if (!media.hcId) {
+          return;
+        }
+        const book = await hardcover.getBook(media.hcId);
+        notificationManager.sendNotification(type, {
+          media,
+          request: entity,
+          notifyAdmin,
+          notifySystem,
+          notifyUser: notifyAdmin ? undefined : entity.requestedBy,
+          event,
+          subject: `${book.title}${
+            book.release_date ? ` (${book.release_date.slice(0, 4)})` : ''
+          }`,
+          message: book.description
+            ? truncate(book.description, {
+                length: 500,
+                separator: /\s/,
+                omission: '…',
+              })
+            : 'No description available.',
+          image: book.image.url,
         });
       }
     } catch (e) {

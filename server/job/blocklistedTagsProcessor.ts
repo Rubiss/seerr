@@ -14,7 +14,7 @@ import type {
 } from '@server/lib/scanners/baseScanner';
 import { getSettings } from '@server/lib/settings';
 import logger from '@server/logger';
-import { createTmdbWithBlocklistSettings } from '@server/routes/discover';
+import { createTmdbWithRegionLanguage } from '@server/routes/discover';
 import type { EntityManager } from 'typeorm';
 
 const TMDB_API_DELAY_MS = 250;
@@ -65,7 +65,7 @@ class BlocklistedTagProcessor implements RunnableScanner<StatusBase> {
   }
 
   private async createBlocklistEntries(em: EntityManager) {
-    const tmdb = createTmdbWithBlocklistSettings();
+    const tmdb = createTmdbWithRegionLanguage();
 
     const settings = getSettings();
     const blocklistedTags = settings.main.blocklistedTags;
@@ -173,7 +173,7 @@ class BlocklistedTagProcessor implements RunnableScanner<StatusBase> {
 
     for (const entry of response.results) {
       const blocklistEntry = await blocklistRepository.findOne({
-        where: { tmdbId: entry.id, mediaType },
+        where: { externalId: entry.id },
       });
 
       if (blocklistEntry) {
@@ -194,7 +194,7 @@ class BlocklistedTagProcessor implements RunnableScanner<StatusBase> {
             blocklistRequest: {
               mediaType,
               title: 'title' in entry ? entry.title : entry.name,
-              tmdbId: entry.id,
+              externalId: entry.id,
               blocklistedTags: `,${keywordId},`,
             },
           },
@@ -209,11 +209,7 @@ class BlocklistedTagProcessor implements RunnableScanner<StatusBase> {
     const mediaRepository = em.getRepository(Media);
     const mediaToRemove = await mediaRepository
       .createQueryBuilder('media')
-      .innerJoinAndSelect(
-        Blocklist,
-        'blist',
-        'blist.tmdbId = media.tmdbId AND blist.mediaType = media.mediaType'
-      )
+      .innerJoinAndSelect(Blocklist, 'blist', 'blist.externalId = media.tmdbId')
       .where(`blist.blocklistedTags IS NOT NULL`)
       .getMany();
 

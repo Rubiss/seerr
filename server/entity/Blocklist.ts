@@ -1,4 +1,4 @@
-import { MediaStatus, type MediaType } from '@server/constants/media';
+import { MediaStatus, MediaType } from '@server/constants/media';
 import dataSource from '@server/datasource';
 import Media from '@server/entity/Media';
 import { User } from '@server/entity/User';
@@ -18,7 +18,7 @@ import {
 import type { ZodNumber, ZodOptional, ZodString } from 'zod';
 
 @Entity()
-@Unique(['tmdbId', 'mediaType'])
+@Unique(['externalId', 'mediaType'])
 export class Blocklist implements BlocklistItem {
   @PrimaryGeneratedColumn()
   public id: number;
@@ -31,12 +31,11 @@ export class Blocklist implements BlocklistItem {
 
   @Column()
   @Index()
-  public tmdbId: number;
+  public externalId: number;
 
   @ManyToOne(() => User, (user) => user.id, {
     eager: true,
   })
-  @Index()
   user?: User;
 
   @OneToOne(() => Media, (media) => media.blocklist, {
@@ -62,7 +61,7 @@ export class Blocklist implements BlocklistItem {
       blocklistRequest: {
         mediaType: MediaType;
         title?: ZodOptional<ZodString>['_output'];
-        tmdbId: ZodNumber['_output'];
+        externalId: ZodNumber['_output'];
         blocklistedTags?: string;
       };
     },
@@ -74,11 +73,14 @@ export class Blocklist implements BlocklistItem {
     });
 
     const mediaRepository = em.getRepository(Media);
+
+    const whereCondition =
+      blocklistRequest.mediaType === MediaType.BOOK
+        ? { hcId: blocklistRequest.externalId }
+        : { tmdbId: blocklistRequest.externalId };
+
     let media = await mediaRepository.findOne({
-      where: {
-        tmdbId: blocklistRequest.tmdbId,
-        mediaType: blocklistRequest.mediaType,
-      },
+      where: whereCondition,
     });
 
     const blocklistRepository = em.getRepository(this);
@@ -87,18 +89,20 @@ export class Blocklist implements BlocklistItem {
 
     if (!media) {
       media = new Media({
-        tmdbId: blocklistRequest.tmdbId,
         status: MediaStatus.BLOCKLISTED,
-        status4k: MediaStatus.BLOCKLISTED,
+        statusAlt: MediaStatus.BLOCKLISTED,
         mediaType: blocklistRequest.mediaType,
         blocklist: Promise.resolve(blocklist),
+        ...(blocklistRequest.mediaType === MediaType.BOOK
+          ? { hcId: blocklistRequest.externalId }
+          : { tmdbId: blocklistRequest.externalId }),
       });
 
       await mediaRepository.save(media);
     } else {
       media.blocklist = Promise.resolve(blocklist);
       media.status = MediaStatus.BLOCKLISTED;
-      media.status4k = MediaStatus.BLOCKLISTED;
+      media.statusAlt = MediaStatus.BLOCKLISTED;
 
       await mediaRepository.save(media);
     }

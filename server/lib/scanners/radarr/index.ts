@@ -150,7 +150,7 @@ class RadarrScanner
       });
 
       for (const media of processingMovies) {
-        if (!this.scannedTmdbIds.has(media.tmdbId)) {
+        if (media.tmdbId && !this.scannedTmdbIds.has(media.tmdbId)) {
           media.status = MediaStatus.UNKNOWN;
           await mediaRepository.save(media);
           this.log(
@@ -170,13 +170,13 @@ class RadarrScanner
       const processing4kMovies = await mediaRepository.find({
         where: {
           mediaType: MediaType.MOVIE,
-          status4k: MediaStatus.PROCESSING,
+          statusAlt: MediaStatus.PROCESSING,
         },
       });
 
       for (const media of processing4kMovies) {
-        if (!this.scanned4kTmdbIds.has(media.tmdbId)) {
-          media.status4k = MediaStatus.UNKNOWN;
+        if (media.tmdbId && !this.scanned4kTmdbIds.has(media.tmdbId)) {
+          media.statusAlt = MediaStatus.UNKNOWN;
           await mediaRepository.save(media);
           this.log(
             `Movie ${media.tmdbId} not found in any 4K Radarr server. 4K status reset to UNKNOWN.`,

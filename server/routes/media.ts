@@ -1,4 +1,5 @@
 import RadarrAPI from '@server/api/servarr/radarr';
+import ReadarrAPI from '@server/api/servarr/readarr';
 import SonarrAPI from '@server/api/servarr/sonarr';
 import TautulliAPI from '@server/api/tautulli';
 import TheMovieDb from '@server/api/themoviedb';
@@ -17,9 +18,30 @@ import logger from '@server/logger';
 import { isAuthenticated } from '@server/middleware/auth';
 import { Router } from 'express';
 import type { FindOneOptions } from 'typeorm';
-import { EntityNotFoundError, In, IsNull, Not } from 'typeorm';
+import { In } from 'typeorm';
 
 const mediaRoutes = Router();
+
+mediaRoutes.get<{ mediatype: string; mediaid: string }>(
+  '/lookup/:mediatype/:mediaid',
+  async (req, res, next) => {
+    const mediaRepository = getRepository(Media);
+
+    try {
+      const mediaTypeParam = req.params.mediatype.toLowerCase();
+      const externalId = Number(req.params.mediaid);
+      const key = mediaTypeParam === 'book' ? 'hcId' : 'tmdbId';
+
+      const media = await mediaRepository.findOne({
+        where: { [key]: externalId, mediaType: mediaTypeParam as MediaType },
+      });
+
+      return res.status(200).json({ id: media?.id || null });
+    } catch (e) {
+      next({ status: 500, message: e.message });
+    }
+  }
+);
 
 mediaRoutes.get('/', async (req, res, next) => {
   const mediaRepository = getRepository(Media);
@@ -48,6 +70,8 @@ mediaRoutes.get('/', async (req, res, next) => {
     case 'pending':
       statusFilter = MediaStatus.PENDING;
       break;
+    default:
+      statusFilter = undefined;
   }
 
   let sortFilter: FindOneOptions<Media>['order'] = {
@@ -66,18 +90,12 @@ mediaRoutes.get('/', async (req, res, next) => {
       };
   }
 
-  let whereClause: FindOneOptions<Media>['where'];
-  if (statusFilter || req.query.sort === 'mediaAdded') {
-    whereClause = {};
-    if (statusFilter) whereClause.status = statusFilter;
-    if (req.query.sort === 'mediaAdded')
-      whereClause.mediaAddedAt = Not(IsNull());
-  }
-
   try {
     const [media, mediaCount] = await mediaRepository.findAndCount({
       order: sortFilter,
-      where: whereClause,
+      where: statusFilter && {
+        status: statusFilter,
+      },
       take: pageSize,
       skip,
     });
@@ -116,11 +134,11 @@ mediaRoutes.post<
       return next({ status: 404, message: 'Media does not exist.' });
     }
 
-    const is4k = String(req.body.is4k) === 'true';
+    const is4k = Boolean(req.body.is4k);
 
     switch (req.params.status) {
       case 'available':
-        media[is4k ? 'status4k' : 'status'] = MediaStatus.AVAILABLE;
+        media[is4k ? 'statusAlt' : 'status'] = MediaStatus.AVAILABLE;
 
         if (media.mediaType === MediaType.TV) {
           const expectedSeasons = req.body.seasons ?? [];
@@ -149,16 +167,16 @@ mediaRoutes.post<
             message: 'Only series can be set to be partially available',
           });
         }
-        media[is4k ? 'status4k' : 'status'] = MediaStatus.PARTIALLY_AVAILABLE;
+        media.status = MediaStatus.PARTIALLY_AVAILABLE;
         break;
       case 'processing':
-        media[is4k ? 'status4k' : 'status'] = MediaStatus.PROCESSING;
+        media.status = MediaStatus.PROCESSING;
         break;
       case 'pending':
-        media[is4k ? 'status4k' : 'status'] = MediaStatus.PENDING;
+        media.status = MediaStatus.PENDING;
         break;
       case 'unknown':
-        media[is4k ? 'status4k' : 'status'] = MediaStatus.UNKNOWN;
+        media.status = MediaStatus.UNKNOWN;
     }
 
     await mediaRepository.save(media);
@@ -178,24 +196,15 @@ mediaRoutes.delete(
         where: { id: Number(req.params.id) },
       });
 
-      if (media.status === MediaStatus.BLOCKLISTED) {
-        media.resetServiceData();
-        await mediaRepository.save(media);
-      } else {
-        await mediaRepository.remove(media);
-      }
+      await mediaRepository.remove(media);
 
       return res.status(204).send();
     } catch (e) {
-      if (e instanceof EntityNotFoundError) {
-        return res.status(204).send();
-      }
-      logger.error('Something went wrong deleting media', {
+      logger.error('Something went wrong fetching media in delete request', {
         label: 'Media',
-        mediaId: req.params.id,
         message: e.message,
       });
-      next({ status: 500, message: 'Failed to delete media' });
+      next({ status: 404, message: 'Media not found' });
     }
   }
 );
@@ -211,43 +220,54 @@ mediaRoutes.delete(
         where: { id: Number(req.params.id) },
       });
 
-      const is4k = String(req.query.is4k) === 'true';
+      const isAlt = req.query.isAlt === 'true';
       const isMovie = media.mediaType === MediaType.MOVIE;
+      const isBook = media.mediaType === MediaType.BOOK;
 
       let serviceSettings;
       if (isMovie) {
         serviceSettings = settings.radarr.find(
-          (radarr) => radarr.isDefault && radarr.is4k === is4k
+          (radarr) => radarr.isDefault && radarr.is4k === isAlt
+        );
+      } else if (isBook) {
+        serviceSettings = settings.readarr.find(
+          (readarr) => readarr.isDefault && readarr.isAudio === isAlt
         );
       } else {
         serviceSettings = settings.sonarr.find(
-          (sonarr) => sonarr.isDefault && sonarr.is4k === is4k
+          (sonarr) => sonarr.isDefault && sonarr.is4k === isAlt
         );
       }
 
-      const specificServiceId = is4k ? media.serviceId4k : media.serviceId;
       if (
-        specificServiceId &&
-        specificServiceId >= 0 &&
-        serviceSettings?.id !== specificServiceId
+        media.serviceId &&
+        media.serviceId >= 0 &&
+        serviceSettings?.id !== media.serviceId
       ) {
         if (isMovie) {
           serviceSettings = settings.radarr.find(
-            (radarr) => radarr.id === specificServiceId
+            (radarr) => radarr.id === media.serviceId
+          );
+        } else if (isBook) {
+          serviceSettings = settings.readarr.find(
+            (readarr) => readarr.id === media.serviceId
           );
         } else {
           serviceSettings = settings.sonarr.find(
-            (sonarr) => sonarr.id === specificServiceId
+            (sonarr) => sonarr.id === media.serviceId
           );
         }
       }
 
+      const serviceName = isMovie ? 'Radarr' : isBook ? 'Readarr' : 'Sonarr';
+      const serviceType = isAlt ? (isBook ? 'Audiobook' : '4K ') : '';
+
       if (!serviceSettings) {
         logger.warn(
           `There is no default ${
-            is4k ? '4K ' : '' + isMovie ? 'Radarr' : 'Sonarr'
+            serviceType + serviceName
           }/ server configured. Did you set any of your ${
-            is4k ? '4K ' : '' + isMovie ? 'Radarr' : 'Sonarr'
+            serviceType + serviceName
           } servers as default?`,
           {
             label: 'Media Request',
@@ -263,6 +283,11 @@ mediaRoutes.delete(
           apiKey: serviceSettings?.apiKey,
           url: RadarrAPI.buildUrl(serviceSettings, '/api/v3'),
         });
+      } else if (isBook) {
+        service = new ReadarrAPI({
+          apiKey: serviceSettings?.apiKey,
+          url: ReadarrAPI.buildUrl(serviceSettings, '/api/v1'),
+        });
       } else {
         service = new SonarrAPI({
           apiKey: serviceSettings?.apiKey,
@@ -271,9 +296,23 @@ mediaRoutes.delete(
       }
 
       if (isMovie) {
-        await (service as RadarrAPI).removeMovie(media.tmdbId);
+        await (service as RadarrAPI).removeMovie(
+          parseInt(
+            isAlt
+              ? (media.externalServiceSlugAlt as string)
+              : (media.externalServiceSlug as string)
+          )
+        );
+      } else if (isBook) {
+        if (!media.hasHcId()) {
+          throw new Error('Hardcover ID is missing for this media!');
+        }
+        await (service as ReadarrAPI).removeBook(media.hcId);
       } else {
         const tmdb = new TheMovieDb();
+        if (!media.hasTmdbId()) {
+          throw new Error('TMDB ID is missing for this media!');
+        }
         const series = await tmdb.getTvShow({ tvId: media.tmdbId });
         const tvdbId = series.external_ids.tvdb_id ?? media.tvdbId;
         if (!tvdbId) {
@@ -323,12 +362,12 @@ mediaRoutes.get<{ id: string }, MediaWatchDataResponse>(
       if (media.ratingKey) {
         const watchStats = await tautulli.getMediaWatchStats(media.ratingKey);
         const watchUsers = await tautulli.getMediaWatchUsers(media.ratingKey);
-        const plexIds = watchUsers.map((u) => u.user_id);
-        if (!plexIds.length) plexIds.push(-1);
 
         const users = await userRepository
           .createQueryBuilder('user')
-          .where('user.plexId IN (:...plexIds)', { plexIds })
+          .where('user.plexId IN (:...plexIds)', {
+            plexIds: watchUsers.map((u) => u.user_id),
+          })
           .getMany();
 
         const playCount =
@@ -348,19 +387,19 @@ mediaRoutes.get<{ id: string }, MediaWatchDataResponse>(
         };
       }
 
-      if (media.ratingKey4k) {
+      if (media.ratingKeyAlt) {
         const watchStats4k = await tautulli.getMediaWatchStats(
-          media.ratingKey4k
+          media.ratingKeyAlt
         );
         const watchUsers4k = await tautulli.getMediaWatchUsers(
-          media.ratingKey4k
+          media.ratingKeyAlt
         );
-        const plexIds4k = watchUsers4k.map((u) => u.user_id);
-        if (!plexIds4k.length) plexIds4k.push(-1);
 
         const users = await userRepository
           .createQueryBuilder('user')
-          .where('user.plexId IN (:...plexIds)', { plexIds: plexIds4k })
+          .where('user.plexId IN (:...plexIds)', {
+            plexIds: watchUsers4k.map((u) => u.user_id),
+          })
           .getMany();
 
         const playCount =

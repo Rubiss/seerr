@@ -1,16 +1,9 @@
-import {
-  DISCORD_SNOWFLAKE_REGEX,
-  EmbedColors,
-} from '@server/constants/discord';
 import { IssueStatus, IssueTypeName } from '@server/constants/issue';
 import { getRepository } from '@server/datasource';
 import { User } from '@server/entity/User';
-import { getIntl } from '@server/i18n';
-import globalMessages from '@server/i18n/globalMessages';
 import type { NotificationAgentDiscord } from '@server/lib/settings';
 import { NotificationAgentKey, getSettings } from '@server/lib/settings';
 import logger from '@server/logger';
-import type { AvailableLocale } from '@server/types/languages';
 import axios from 'axios';
 import {
   Notification,
@@ -20,8 +13,31 @@ import {
 import type { NotificationAgent, NotificationPayload } from './agent';
 import { BaseAgent } from './agent';
 
-const isValidSnowflake = (id: string): boolean =>
-  DISCORD_SNOWFLAKE_REGEX.test(id);
+enum EmbedColors {
+  DEFAULT = 0,
+  AQUA = 1752220,
+  GREEN = 3066993,
+  BLUE = 3447003,
+  PURPLE = 10181046,
+  GOLD = 15844367,
+  ORANGE = 15105570,
+  RED = 15158332,
+  GREY = 9807270,
+  DARKER_GREY = 8359053,
+  NAVY = 3426654,
+  DARK_AQUA = 1146986,
+  DARK_GREEN = 2067276,
+  DARK_BLUE = 2123412,
+  DARK_PURPLE = 7419530,
+  DARK_GOLD = 12745742,
+  DARK_ORANGE = 11027200,
+  DARK_RED = 10038562,
+  DARK_GREY = 9936031,
+  LIGHT_GREY = 12370112,
+  DARK_NAVY = 2899536,
+  LUMINOUS_VIVID_PINK = 16580705,
+  DARK_VIVID_PINK = 12320855,
+}
 
 interface DiscordImageEmbed {
   url?: string;
@@ -37,7 +53,7 @@ interface Field {
 }
 interface DiscordRichEmbed {
   title?: string;
-  type?: 'rich';
+  type?: 'rich'; // Always rich for webhooks
   description?: string;
   url?: string;
   timestamp?: string;
@@ -91,10 +107,8 @@ class DiscordAgent
 
   public buildEmbed(
     type: Notification,
-    payload: NotificationPayload,
-    locale?: AvailableLocale
+    payload: NotificationPayload
   ): DiscordRichEmbed {
-    const intl = getIntl(locale);
     const settings = getSettings();
     const { applicationUrl } = settings.main;
     const { embedPoster } = settings.notifications.agents.discord;
@@ -106,7 +120,7 @@ class DiscordAgent
 
     if (payload.request) {
       fields.push({
-        name: intl.formatMessage(globalMessages.requestedBy),
+        name: 'Requested By',
         value: payload.request.requestedBy.displayName,
         inline: true,
       });
@@ -115,60 +129,56 @@ class DiscordAgent
       switch (type) {
         case Notification.MEDIA_PENDING:
           color = EmbedColors.ORANGE;
-          status = `[${intl.formatMessage(globalMessages.pendingApproval)}](${appUrl}/requests)`;
+          status = `[Pending Approval](${appUrl}/requests)`;
           break;
         case Notification.MEDIA_APPROVED:
         case Notification.MEDIA_AUTO_APPROVED:
           color = EmbedColors.PURPLE;
-          status = intl.formatMessage(globalMessages.processing);
+          status = 'Processing';
           break;
         case Notification.MEDIA_AVAILABLE:
           color = EmbedColors.GREEN;
-          status = intl.formatMessage(globalMessages.available);
+          status = 'Available';
           break;
         case Notification.MEDIA_DECLINED:
           color = EmbedColors.RED;
-          status = intl.formatMessage(globalMessages.declined);
+          status = 'Declined';
           break;
         case Notification.MEDIA_FAILED:
           color = EmbedColors.RED;
-          status = intl.formatMessage(globalMessages.failed);
+          status = 'Failed';
           break;
       }
 
       if (status) {
         fields.push({
-          name: intl.formatMessage(globalMessages.requestStatus),
+          name: 'Request Status',
           value: status,
           inline: true,
         });
       }
     } else if (payload.comment) {
       fields.push({
-        name: intl.formatMessage(globalMessages.commentFrom, {
-          userName: payload.comment.user.displayName,
-        }),
+        name: `Comment from ${payload.comment.user.displayName}`,
         value: payload.comment.message,
         inline: false,
       });
     } else if (payload.issue) {
       fields.push(
         {
-          name: intl.formatMessage(globalMessages.reportedBy),
+          name: 'Reported By',
           value: payload.issue.createdBy.displayName,
           inline: true,
         },
         {
-          name: intl.formatMessage(globalMessages.issueType),
+          name: 'Issue Type',
           value: IssueTypeName[payload.issue.issueType],
           inline: true,
         },
         {
-          name: intl.formatMessage(globalMessages.issueStatus),
+          name: 'Issue Status',
           value:
-            payload.issue.status === IssueStatus.OPEN
-              ? intl.formatMessage(globalMessages.open)
-              : intl.formatMessage(globalMessages.resolved),
+            payload.issue.status === IssueStatus.OPEN ? 'Open' : 'Resolved',
           inline: true,
         }
       );
@@ -199,18 +209,25 @@ class DiscordAgent
       ? payload.issue
         ? `${applicationUrl}/issues/${payload.issue.id}`
         : payload.media
-          ? `${applicationUrl}/${payload.media.mediaType}/${payload.media.tmdbId}`
+          ? `${applicationUrl}/${payload.media.mediaType}/${
+              payload.media.mediaType === 'book'
+                ? payload.media.hcId
+                : payload.media.tmdbId
+            }`
           : undefined
       : undefined;
 
     return {
-      title: payload.event
-        ? `${payload.event}: ${payload.subject}`
-        : payload.subject,
+      title: payload.subject,
       url,
       description: payload.message,
       color,
       timestamp: new Date().toISOString(),
+      author: payload.event
+        ? {
+            name: payload.event,
+          }
+        : undefined,
       fields,
       thumbnail: embedPoster
         ? {
@@ -258,13 +275,13 @@ class DiscordAgent
             payload.notifyUser.settings?.hasNotificationType(
               NotificationAgentKey.DISCORD,
               type
-            ) &&
-            payload.notifyUser.settings.discordIds?.length
+            )
           ) {
-            const validIds = payload.notifyUser.settings.discordIds.filter(
-              (id) => isValidSnowflake(id)
+            userMentions.push(
+              ...(payload.notifyUser.settings.discordIds ?? [])
+                .filter((id) => id)
+                .map((id) => `<@${id}>`)
             );
-            userMentions.push(...validIds.map((id) => `<@${id}>`));
           }
         }
 
@@ -284,46 +301,25 @@ class DiscordAgent
                   shouldSendAdminNotification(type, user, payload)
               )
               .flatMap((user) =>
-                user
-                  .settings!.discordIds.filter((id) => isValidSnowflake(id))
+                (user.settings!.discordIds ?? [])
+                  .filter((id) => id)
                   .map((id) => `<@${id}>`)
               )
           );
         }
       }
 
-      const allowedUserIds = userMentions.map((mention) =>
-        mention.replace(/[<@>]/g, '')
-      );
-
-      const allowedRoleIds: string[] = [];
-
-      if (
-        settings.options.webhookRoleId &&
-        isValidSnowflake(settings.options.webhookRoleId)
-      ) {
+      if (settings.options.webhookRoleId) {
         userMentions.push(`<@&${settings.options.webhookRoleId}>`);
-        allowedRoleIds.push(settings.options.webhookRoleId);
       }
-
-      // Discord webhooks go to a channel, not per-user,
-      // so if use user locale is set, we'll use the locale of the user being notified
-      // if not, we'll use the default locale set in the notification settings
-      const locale = settings.options.useUserLocale
-        ? (payload.notifyUser?.settings?.locale as AvailableLocale)
-        : (settings.options.locale as AvailableLocale);
 
       await axios.post(settings.options.webhookUrl, {
         username: settings.options.botUsername
           ? settings.options.botUsername
           : getSettings().main.applicationTitle,
         avatar_url: settings.options.botAvatarUrl,
-        embeds: [this.buildEmbed(type, payload, locale)],
+        embeds: [this.buildEmbed(type, payload)],
         content: userMentions.join(' '),
-        allowed_mentions: {
-          users: allowedUserIds,
-          roles: allowedRoleIds,
-        },
       } as DiscordWebhookPayload);
 
       return true;

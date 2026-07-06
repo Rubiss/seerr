@@ -1,5 +1,8 @@
+import Hardcover from '@server/api/hardcover';
 import type { RadarrMovieOptions } from '@server/api/servarr/radarr';
 import RadarrAPI from '@server/api/servarr/radarr';
+import type { ReadarrBookOptions } from '@server/api/servarr/readarr';
+import ReadarrAPI from '@server/api/servarr/readarr';
 import type {
   AddSeriesOptions,
   SonarrSeries,
@@ -15,7 +18,6 @@ import {
 import { getRepository } from '@server/datasource';
 import Media from '@server/entity/Media';
 import { MediaRequest } from '@server/entity/MediaRequest';
-import Season from '@server/entity/Season';
 import SeasonRequest from '@server/entity/SeasonRequest';
 import notificationManager, { Notification } from '@server/lib/notifications';
 import { getSettings } from '@server/lib/settings';
@@ -28,17 +30,7 @@ import type {
   RemoveEvent,
   UpdateEvent,
 } from 'typeorm';
-import { EventSubscriber, Not } from 'typeorm';
-
-const sanitizeDisplayName = (displayName: string): string => {
-  return displayName
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/\s+/g, '-')
-    .replace(/[^a-z0-9-]/gi, '')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '');
-};
+import { EventSubscriber } from 'typeorm';
 
 @EventSubscriber()
 export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRequest> {
@@ -63,8 +55,13 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
     // Check availability using fresh media state
     if (
       !latestMedia ||
-      latestMedia[entity.is4k ? 'status4k' : 'status'] !== MediaStatus.AVAILABLE
+      latestMedia[entity.isAlt ? 'statusAlt' : 'status'] !==
+        MediaStatus.AVAILABLE
     ) {
+      return;
+    }
+
+    if (!entity.media.tmdbId) {
       return;
     }
 
@@ -76,7 +73,7 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
       });
 
       notificationManager.sendNotification(Notification.MEDIA_AVAILABLE, {
-        event: `${entity.is4k ? '4K ' : ''}Movie Request Now Available`,
+        event: `${entity.isAlt ? '4K ' : ''}Movie Request Now Available`,
         notifyAdmin: false,
         notifySystem: true,
         notifyUser: entity.requestedBy,
@@ -130,7 +127,8 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
       entity.seasons?.map((entitySeason) => entitySeason.seasonNumber) ?? [];
     const availableSeasons = latestMedia.seasons.filter(
       (season) =>
-        season[entity.is4k ? 'status4k' : 'status'] === MediaStatus.AVAILABLE &&
+        season[entity.isAlt ? 'status4k' : 'status'] ===
+          MediaStatus.AVAILABLE &&
         requestedSeasons.includes(season.seasonNumber)
     );
     const isMediaAvailable =
@@ -141,13 +139,17 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
       return;
     }
 
+    if (!entity.media.tmdbId) {
+      return;
+    }
+
     const tmdb = new TheMovieDb();
 
     try {
       const tv = await tmdb.getTvShow({ tvId: entity.media.tmdbId });
 
       notificationManager.sendNotification(Notification.MEDIA_AVAILABLE, {
-        event: `${entity.is4k ? '4K ' : ''}Series Request Now Available`,
+        event: `${entity.isAlt ? '4K ' : ''}Series Request Now Available`,
         subject: `${tv.name}${
           tv.first_air_date ? ` (${tv.first_air_date.slice(0, 4)})` : ''
         }`,
@@ -186,6 +188,9 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
       entity.type === MediaType.MOVIE
     ) {
       try {
+        if (!entity.media.hasTmdbId()) {
+          throw new Error('TMDB ID is missing for this media.');
+        }
         const mediaRepository = getRepository(Media);
         const settings = getSettings();
         if (settings.radarr.length === 0 && !settings.radarr[0]) {
@@ -201,7 +206,7 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
         }
 
         let radarrSettings = settings.radarr.find(
-          (radarr) => radarr.isDefault && radarr.is4k === entity.is4k
+          (radarr) => radarr.isDefault && radarr.is4k === entity.isAlt
         );
 
         if (
@@ -225,9 +230,9 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
         if (!radarrSettings) {
           logger.warn(
             `There is no default ${
-              entity.is4k ? '4K ' : ''
+              entity.isAlt ? '4K ' : ''
             }Radarr server configured. Did you set any of your ${
-              entity.is4k ? '4K ' : ''
+              entity.isAlt ? '4K ' : ''
             }Radarr servers as default?`,
             {
               label: 'Media Request',
@@ -319,15 +324,11 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
               mediaId: entity.media.id,
               userId: entity.requestedBy.id,
               newTag:
-                entity.requestedBy.id +
-                '-' +
-                sanitizeDisplayName(entity.requestedBy.displayName),
+                entity.requestedBy.id + '-' + entity.requestedBy.displayName,
             });
             userTag = await radarr.createTag({
               label:
-                entity.requestedBy.id +
-                '-' +
-                sanitizeDisplayName(entity.requestedBy.displayName),
+                entity.requestedBy.id + '-' + entity.requestedBy.displayName,
             });
           }
           if (userTag.id) {
@@ -346,16 +347,16 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
         }
 
         if (
-          media[entity.is4k ? 'status4k' : 'status'] === MediaStatus.AVAILABLE
+          media[entity.isAlt ? 'statusAlt' : 'status'] === MediaStatus.AVAILABLE
         ) {
-          logger.warn('Media already exists, marking request as COMPLETED', {
+          logger.warn('Media already exists, marking request as APPROVED', {
             label: 'Media Request',
             requestId: entity.id,
             mediaId: entity.media.id,
           });
 
           const requestRepository = getRepository(MediaRequest);
-          entity.status = MediaRequestStatus.COMPLETED;
+          entity.status = MediaRequestStatus.APPROVED;
           await requestRepository.save(entity);
           return;
         }
@@ -386,33 +387,20 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
               throw new Error('Media data not found');
             }
 
-            media[entity.is4k ? 'externalServiceId4k' : 'externalServiceId'] =
+            media[entity.isAlt ? 'externalServiceIdAlt' : 'externalServiceId'] =
               radarrMovie.id;
             media[
-              entity.is4k ? 'externalServiceSlug4k' : 'externalServiceSlug'
+              entity.isAlt ? 'externalServiceSlugAlt' : 'externalServiceSlug'
             ] = radarrMovie.titleSlug;
-            media[entity.is4k ? 'serviceId4k' : 'serviceId'] =
+            media[entity.isAlt ? 'serviceIdAlt' : 'serviceId'] =
               radarrSettings?.id;
             await mediaRepository.save(media);
           })
           .catch(async () => {
-            try {
-              const requestRepository = getRepository(MediaRequest);
+            const requestRepository = getRepository(MediaRequest);
 
-              if (entity.status !== MediaRequestStatus.FAILED) {
-                entity.status = MediaRequestStatus.FAILED;
-                await requestRepository.save(entity);
-              }
-            } catch (saveError) {
-              logger.error('Failed to mark request as FAILED', {
-                label: 'Media Request',
-                requestId: entity.id,
-                errorMessage:
-                  saveError instanceof Error
-                    ? saveError.message
-                    : String(saveError),
-              });
-            }
+            entity.status = MediaRequestStatus.FAILED;
+            requestRepository.save(entity);
 
             logger.warn(
               'Something went wrong sending movie request to Radarr, marking status as FAILED',
@@ -433,8 +421,8 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
           .finally(() => {
             radarr.clearCache({
               tmdbId: movie.id,
-              externalId: entity.is4k
-                ? media.externalServiceId4k
+              externalId: entity.isAlt
+                ? media.externalServiceIdAlt
                 : media.externalServiceId,
             });
           });
@@ -444,32 +432,13 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
           mediaId: entity.media.id,
         });
       } catch (e) {
-        const requestRepository = getRepository(MediaRequest);
-        const mediaRepository = getRepository(Media);
-        const media = await mediaRepository.findOne({
-          where: { id: entity.media.id },
+        logger.error('Something went wrong sending request to Radarr', {
+          label: 'Media Request',
+          errorMessage: e.message,
+          requestId: entity.id,
+          mediaId: entity.media.id,
         });
-
-        if (media) {
-          entity.status = MediaRequestStatus.FAILED;
-          await requestRepository.save(entity);
-
-          logger.warn(
-            'Failed to send movie request to Radarr due to connection or configuration error, marking status as FAILED',
-            {
-              label: 'Media Request',
-              requestId: entity.id,
-              mediaId: entity.media.id,
-              errorMessage: e.message,
-            }
-          );
-
-          MediaRequest.sendNotification(
-            entity,
-            media,
-            Notification.MEDIA_FAILED
-          );
-        }
+        throw new Error(e.message);
       }
     }
   }
@@ -495,7 +464,7 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
         }
 
         let sonarrSettings = settings.sonarr.find(
-          (sonarr) => sonarr.isDefault && sonarr.is4k === entity.is4k
+          (sonarr) => sonarr.isDefault && sonarr.is4k === entity.isAlt
         );
 
         if (
@@ -519,9 +488,9 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
         if (!sonarrSettings) {
           logger.warn(
             `There is no default ${
-              entity.is4k ? '4K ' : ''
+              entity.isAlt ? '4K ' : ''
             }Sonarr server configured. Did you set any of your ${
-              entity.is4k ? '4K ' : ''
+              entity.isAlt ? '4K ' : ''
             }Sonarr servers as default?`,
             {
               label: 'Media Request',
@@ -534,26 +503,28 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
 
         const media = await mediaRepository.findOne({
           where: { id: entity.media.id },
+          relations: { requests: true },
         });
 
         if (!media) {
           throw new Error('Media data not found');
         }
 
+        if (!media.hasTmdbId()) {
+          throw new Error('TMDB ID is missing for this media.');
+        }
+
         if (
-          media[entity.is4k ? 'status4k' : 'status'] === MediaStatus.AVAILABLE
+          media[entity.isAlt ? 'statusAlt' : 'status'] === MediaStatus.AVAILABLE
         ) {
-          logger.warn('Media already exists, marking request as COMPLETED', {
+          logger.warn('Media already exists, marking request as APPROVED', {
             label: 'Media Request',
             requestId: entity.id,
             mediaId: entity.media.id,
           });
 
           const requestRepository = getRepository(MediaRequest);
-          entity.status = MediaRequestStatus.COMPLETED;
-          entity.seasons.forEach((season) => {
-            season.status = MediaRequestStatus.COMPLETED;
-          });
+          entity.status = MediaRequestStatus.APPROVED;
           await requestRepository.save(entity);
           return;
         }
@@ -674,15 +645,11 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
               mediaId: entity.media.id,
               userId: entity.requestedBy.id,
               newTag:
-                entity.requestedBy.id +
-                '-' +
-                sanitizeDisplayName(entity.requestedBy.displayName),
+                entity.requestedBy.id + '-' + entity.requestedBy.displayName,
             });
             userTag = await sonarr.createTag({
               label:
-                entity.requestedBy.id +
-                '-' +
-                sanitizeDisplayName(entity.requestedBy.displayName),
+                entity.requestedBy.id + '-' + entity.requestedBy.displayName,
             });
           }
           if (userTag.id) {
@@ -711,7 +678,6 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
           seriesType,
           tags,
           monitored: true,
-          monitorNewItems: sonarrSettings.monitorNewItems,
           searchNow: !sonarrSettings.preventSearch,
         };
 
@@ -722,39 +688,27 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
             // We grab media again here to make sure we have the latest version of it
             const media = await mediaRepository.findOne({
               where: { id: entity.media.id },
+              relations: { requests: true },
             });
 
             if (!media) {
               throw new Error('Media data not found');
             }
 
-            media[entity.is4k ? 'externalServiceId4k' : 'externalServiceId'] =
+            media[entity.isAlt ? 'externalServiceIdAlt' : 'externalServiceId'] =
               sonarrSeries.id;
             media[
-              entity.is4k ? 'externalServiceSlug4k' : 'externalServiceSlug'
+              entity.isAlt ? 'externalServiceSlugAlt' : 'externalServiceSlug'
             ] = sonarrSeries.titleSlug;
-            media[entity.is4k ? 'serviceId4k' : 'serviceId'] =
+            media[entity.isAlt ? 'serviceIdAlt' : 'serviceId'] =
               sonarrSettings?.id;
             await mediaRepository.save(media);
           })
           .catch(async () => {
-            try {
-              const requestRepository = getRepository(MediaRequest);
+            const requestRepository = getRepository(MediaRequest);
 
-              if (entity.status !== MediaRequestStatus.FAILED) {
-                entity.status = MediaRequestStatus.FAILED;
-                await requestRepository.save(entity);
-              }
-            } catch (saveError) {
-              logger.error('Failed to mark request as FAILED', {
-                label: 'Media Request',
-                requestId: entity.id,
-                errorMessage:
-                  saveError instanceof Error
-                    ? saveError.message
-                    : String(saveError),
-              });
-            }
+            entity.status = MediaRequestStatus.FAILED;
+            requestRepository.save(entity);
 
             logger.warn(
               'Something went wrong sending series request to Sonarr, marking status as FAILED',
@@ -775,8 +729,8 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
           .finally(() => {
             sonarr.clearCache({
               tvdbId,
-              externalId: entity.is4k
-                ? media.externalServiceId4k
+              externalId: entity.isAlt
+                ? media.externalServiceIdAlt
                 : media.externalServiceId,
               title: series.name,
             });
@@ -787,33 +741,356 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
           mediaId: entity.media.id,
         });
       } catch (e) {
-        const requestRepository = getRepository(MediaRequest);
-        const mediaRepository = getRepository(Media);
-        const media = await mediaRepository.findOne({
-          where: { id: entity.media.id },
+        logger.error('Something went wrong sending request to Sonarr', {
+          label: 'Media Request',
+          errorMessage: e.message,
+          requestId: entity.id,
+          mediaId: entity.media.id,
         });
+        throw new Error(e.message);
+      }
+    }
+  }
 
-        if (media) {
-          entity.status = MediaRequestStatus.FAILED;
-          await requestRepository.save(entity);
-
-          logger.warn(
-            'Failed to send series request to Sonarr due to connection or configuration error, marking status as FAILED',
+  public async sendToReadarr(entity: MediaRequest): Promise<void> {
+    if (
+      entity.status === MediaRequestStatus.APPROVED &&
+      entity.type === MediaType.BOOK
+    ) {
+      try {
+        if (!entity.media.hasHcId()) {
+          throw new Error('Hardcover ID is missing for this media.');
+        }
+        const mediaRepository = getRepository(Media);
+        const settings = getSettings();
+        if (settings.readarr.length === 0 && !settings.readarr[0]) {
+          logger.info(
+            'No Readarr server configured, skipping request processing',
             {
               label: 'Media Request',
               requestId: entity.id,
               mediaId: entity.media.id,
-              errorMessage: e.message,
             }
           );
+          return;
+        }
 
-          MediaRequest.sendNotification(
-            entity,
-            media,
-            Notification.MEDIA_FAILED
+        let readarrSettings = settings.readarr.find(
+          (readarr) => readarr.isDefault && readarr.isAudio === entity.isAlt
+        );
+
+        if (
+          entity.serverId !== null &&
+          entity.serverId >= 0 &&
+          readarrSettings?.id !== entity.serverId
+        ) {
+          readarrSettings = settings.readarr.find(
+            (readarr) => readarr.id === entity.serverId
+          );
+          logger.info(
+            `Request has an override server: ${readarrSettings?.name}`,
+            {
+              label: 'Media Request',
+              requestId: entity.id,
+              mediaId: entity.media.id,
+            }
           );
         }
+
+        if (!readarrSettings) {
+          logger.warn(
+            `There is no default ${
+              entity.isAlt ? 'audiobook ' : ''
+            }Readarr server configured. Did you set any of your ${
+              entity.isAlt ? 'audiobook ' : ''
+            }Readarr servers as default?`,
+            {
+              label: 'Media Request',
+              requestId: entity.id,
+              mediaId: entity.media.id,
+            }
+          );
+          return;
+        }
+
+        let rootFolder = readarrSettings.activeDirectory;
+        let qualityProfile = readarrSettings.activeProfileId;
+        let metadataProfile = readarrSettings.activeMetadataProfileId;
+        let tags = readarrSettings.tags ? [...readarrSettings.tags] : [];
+
+        if (
+          entity.rootFolder &&
+          entity.rootFolder !== '' &&
+          entity.rootFolder !== readarrSettings.activeDirectory
+        ) {
+          rootFolder = entity.rootFolder;
+          logger.info(`Request has an override root folder: ${rootFolder}`, {
+            label: 'Media Request',
+            requestId: entity.id,
+            mediaId: entity.media.id,
+          });
+        }
+
+        if (
+          entity.profileId &&
+          entity.profileId !== readarrSettings.activeProfileId
+        ) {
+          qualityProfile = entity.profileId;
+          logger.info(
+            `Request has an override quality profile ID: ${qualityProfile}`,
+            {
+              label: 'Media Request',
+              requestId: entity.id,
+              mediaId: entity.media.id,
+            }
+          );
+        }
+
+        if (
+          entity.metadataProfileId &&
+          entity.metadataProfileId !== readarrSettings.activeMetadataProfileId
+        ) {
+          metadataProfile = entity.metadataProfileId;
+          logger.info(
+            `Request has an override metadata profile ID: ${metadataProfile}`,
+            {
+              label: 'Media Request',
+              requestId: entity.id,
+              mediaId: entity.media.id,
+            }
+          );
+        }
+
+        if (entity.tags && !isEqual(entity.tags, readarrSettings.tags)) {
+          tags = entity.tags;
+          logger.info(`Request has override tags`, {
+            label: 'Media Request',
+            requestId: entity.id,
+            mediaId: entity.media.id,
+            tagIds: tags,
+          });
+        }
+
+        const hardcover = new Hardcover();
+        const readarr = new ReadarrAPI({
+          apiKey: readarrSettings.apiKey,
+          url: ReadarrAPI.buildUrl(readarrSettings, '/api/v1'),
+        });
+        const book = await hardcover.getBook(entity.media.hcId);
+
+        const media = await mediaRepository.findOne({
+          where: { id: entity.media.id },
+        });
+
+        if (!media) {
+          logger.error('Media data not found', {
+            label: 'Media Request',
+            requestId: entity.id,
+            mediaId: entity.media.id,
+          });
+          return;
+        }
+
+        if (readarrSettings.tagRequests) {
+          const readarrTags = await readarr.getTags();
+          // old tags had space around the hyphen
+          let userTag = readarrTags.find((v) =>
+            v.label.startsWith(entity.requestedBy.id + ' - ')
+          );
+          // new tags do not have spaces around the hyphen, since spaces are not allowed anymore
+          if (!userTag) {
+            userTag = readarrTags.find((v) =>
+              v.label.startsWith(entity.requestedBy.id + '-')
+            );
+          }
+          if (!userTag) {
+            logger.info(`Requester has no active tag. Creating new`, {
+              label: 'Media Request',
+              requestId: entity.id,
+              mediaId: entity.media.id,
+              userId: entity.requestedBy.id,
+              newTag:
+                entity.requestedBy.id + '-' + entity.requestedBy.displayName,
+            });
+            userTag = await readarr.createTag({
+              label:
+                entity.requestedBy.id + '-' + entity.requestedBy.displayName,
+            });
+          }
+          if (userTag.id) {
+            if (!tags?.find((v) => v === userTag?.id)) {
+              tags?.push(userTag.id);
+            }
+          } else {
+            logger.warn(`Requester has no tag and failed to add one`, {
+              label: 'Media Request',
+              requestId: entity.id,
+              mediaId: entity.media.id,
+              userId: entity.requestedBy.id,
+              radarrServer:
+                readarrSettings.hostname + ':' + readarrSettings.port,
+            });
+          }
+        }
+
+        if (
+          media[entity.isAlt ? 'statusAlt' : 'status'] === MediaStatus.AVAILABLE
+        ) {
+          logger.warn('Media already exists, marking request as APPROVED', {
+            label: 'Media Request',
+            requestId: entity.id,
+            mediaId: entity.media.id,
+          });
+
+          const requestRepository = getRepository(MediaRequest);
+          entity.status = MediaRequestStatus.APPROVED;
+          await requestRepository.save(entity);
+          return;
+        }
+
+        const readarrBookOptions: ReadarrBookOptions = {
+          profileId: qualityProfile,
+          qualityProfileId: qualityProfile,
+          metadataProfileId: metadataProfile,
+          rootFolderPath: rootFolder,
+          title: book.title,
+          hcId: book.id,
+          authorHcId: book.contributions[0].author.id,
+          monitored: true,
+          tags,
+          searchNow: !readarrSettings.preventSearch,
+        };
+
+        // Run entity asynchronously so we don't wait for it on the UI side
+        readarr
+          .addBook(readarrBookOptions)
+          .then(async (readarrBook) => {
+            // We grab media again here to make sure we have the latest version of it
+            const media = await mediaRepository.findOne({
+              where: { id: entity.media.id },
+            });
+
+            if (!media) {
+              throw new Error('Media data not found');
+            }
+
+            media[entity.isAlt ? 'externalServiceIdAlt' : 'externalServiceId'] =
+              readarrBook.id;
+            media[
+              entity.isAlt ? 'externalServiceSlugAlt' : 'externalServiceSlug'
+            ] = readarrBook.titleSlug;
+            media[entity.isAlt ? 'serviceIdAlt' : 'serviceId'] =
+              readarrSettings?.id;
+            await mediaRepository.save(media);
+          })
+          .catch(async () => {
+            const requestRepository = getRepository(MediaRequest);
+
+            entity.status = MediaRequestStatus.FAILED;
+            requestRepository.save(entity);
+
+            logger.warn(
+              'Something went wrong sending book request to Readarr, marking status as FAILED',
+              {
+                label: 'Media Request',
+                requestId: entity.id,
+                mediaId: entity.media.id,
+                readarrBookOptions,
+              }
+            );
+
+            MediaRequest.sendNotification(
+              entity,
+              media,
+              Notification.MEDIA_FAILED
+            );
+          })
+          .finally(() => {
+            readarr.clearCache({
+              tmdbId: book.id,
+              externalId: entity.isAlt
+                ? media.externalServiceIdAlt
+                : media.externalServiceId,
+            });
+          });
+        logger.info('Sent request to Readarr', {
+          label: 'Media Request',
+          requestId: entity.id,
+          mediaId: entity.media.id,
+        });
+      } catch (e) {
+        logger.error('Something went wrong sending request to Readarr', {
+          label: 'Media Request',
+          errorMessage: e.message,
+          requestId: entity.id,
+          mediaId: entity.media.id,
+        });
+        throw new Error(e.message);
       }
+    }
+  }
+
+  private async notifyAvailableBook(
+    entity: MediaRequest,
+    event?: UpdateEvent<MediaRequest>
+  ) {
+    // Get fresh media state using event manager
+    let latestMedia: Media | null = null;
+    if (event?.manager) {
+      latestMedia = await event.manager.findOne(Media, {
+        where: { id: entity.media.id },
+      });
+    }
+    if (!latestMedia) {
+      const mediaRepository = getRepository(Media);
+      latestMedia = await mediaRepository.findOne({
+        where: { id: entity.media.id },
+      });
+    }
+
+    // Check availability using fresh media state
+    if (
+      !latestMedia ||
+      latestMedia[entity.isAlt ? 'statusAlt' : 'status'] !==
+        MediaStatus.AVAILABLE
+    ) {
+      return;
+    }
+
+    if (!entity.media.hcId) {
+      return;
+    }
+
+    const hardcover = new Hardcover();
+
+    try {
+      const book = await hardcover.getBook(entity.media.hcId);
+
+      notificationManager.sendNotification(Notification.MEDIA_AVAILABLE, {
+        event: `${entity.isAlt ? 'Audiobook ' : 'Book'} Request Now Available`,
+        notifyAdmin: false,
+        notifySystem: true,
+        notifyUser: entity.requestedBy,
+        subject: `${book.title}${
+          book.release_date ? ` (${book.release_date.slice(0, 4)})` : ''
+        }`,
+        message: book.description
+          ? truncate(book.description, {
+              length: 500,
+              separator: /\s/,
+              omission: '…',
+            })
+          : 'No description available.',
+        media: latestMedia,
+        image: book.image?.url,
+        request: entity,
+      });
+    } catch (e) {
+      logger.error('Something went wrong sending book notification(s)', {
+        label: 'Notifications',
+        errorMessage: e.message,
+        mediaId: entity.id,
+      });
     }
   }
 
@@ -821,6 +1098,7 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
     const mediaRepository = getRepository(Media);
     const media = await mediaRepository.findOne({
       where: { id: entity.media.id },
+      relations: { requests: true },
     });
     if (!media) {
       logger.error('Media data not found', {
@@ -830,11 +1108,8 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
       });
       return;
     }
-
-    const statusKey = entity.is4k ? 'status4k' : 'status';
+    const statusKey = entity.isAlt ? 'statusAlt' : 'status';
     const seasonRequestRepository = getRepository(SeasonRequest);
-    const requestRepository = getRepository(MediaRequest);
-
     if (
       entity.status === MediaRequestStatus.APPROVED &&
       // Do not update the status if the item is already partially available or available
@@ -847,7 +1122,8 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
     }
 
     if (
-      media.mediaType === MediaType.MOVIE &&
+      (media.mediaType === MediaType.MOVIE ||
+        media.mediaType === MediaType.BOOK) &&
       entity.status === MediaRequestStatus.DECLINED &&
       media[statusKey] !== MediaStatus.DELETED
     ) {
@@ -864,71 +1140,17 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
     if (
       media.mediaType === MediaType.TV &&
       entity.status === MediaRequestStatus.DECLINED &&
-      media[statusKey] === MediaStatus.PENDING
+      media.requests.filter(
+        (request) =>
+          request.id !== entity.id &&
+          request.isAlt === entity.isAlt &&
+          request.status === MediaRequestStatus.PENDING
+      ).length === 0 &&
+      media[statusKey] === MediaStatus.PENDING &&
+      media[statusKey] !== MediaStatus.DELETED
     ) {
-      const pendingCount = await requestRepository.count({
-        where: {
-          media: { id: media.id },
-          status: MediaRequestStatus.PENDING,
-          is4k: entity.is4k,
-          id: Not(entity.id),
-        },
-      });
-
-      if (pendingCount === 0) {
-        // Re-fetch media without requests to avoid cascade issues
-        const freshMedia = await mediaRepository.findOne({
-          where: { id: media.id },
-        });
-        if (freshMedia) {
-          freshMedia[statusKey] = MediaStatus.UNKNOWN;
-          await mediaRepository.save(freshMedia);
-        }
-      }
-    }
-
-    // Reset season statuses when a TV request is declined
-    if (
-      media.mediaType === MediaType.TV &&
-      entity.status === MediaRequestStatus.DECLINED
-    ) {
-      const seasonRepository = getRepository(Season);
-      const actualSeasons = await seasonRepository.find({
-        where: { media: { id: media.id } },
-      });
-
-      for (const seasonRequest of entity.seasons) {
-        seasonRequest.status = MediaRequestStatus.DECLINED;
-        await seasonRequestRepository.save(seasonRequest);
-
-        const season = actualSeasons.find(
-          (s) => s.seasonNumber === seasonRequest.seasonNumber
-        );
-
-        if (season && season[statusKey] === MediaStatus.PENDING) {
-          const otherActiveRequests = await requestRepository
-            .createQueryBuilder('request')
-            .leftJoinAndSelect('request.seasons', 'season')
-            .where('request.mediaId = :mediaId', { mediaId: media.id })
-            .andWhere('request.id != :requestId', { requestId: entity.id })
-            .andWhere('request.is4k = :is4k', { is4k: entity.is4k })
-            .andWhere('request.status NOT IN (:...statuses)', {
-              statuses: [
-                MediaRequestStatus.DECLINED,
-                MediaRequestStatus.COMPLETED,
-              ],
-            })
-            .andWhere('season.seasonNumber = :seasonNumber', {
-              seasonNumber: season.seasonNumber,
-            })
-            .getCount();
-
-          if (otherActiveRequests === 0) {
-            season[statusKey] = MediaStatus.UNKNOWN;
-            await seasonRepository.save(season);
-          }
-        }
-      }
+      media[statusKey] = MediaStatus.UNKNOWN;
+      await mediaRepository.save(media);
     }
 
     // Approve child seasons if parent is approved
@@ -936,7 +1158,7 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
       media.mediaType === MediaType.TV &&
       entity.status === MediaRequestStatus.APPROVED
     ) {
-      for (const season of entity.seasons) {
+      for (const season of entity.seasons ?? []) {
         season.status = MediaRequestStatus.APPROVED;
         await seasonRequestRepository.save(season);
       }
@@ -954,13 +1176,13 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
 
     const hasActive = fullMedia.requests.some(
       (request) =>
-        !request.is4k &&
+        !request.isAlt &&
         request.status !== MediaRequestStatus.COMPLETED &&
         request.status !== MediaRequestStatus.DECLINED
     );
-    const hasActive4k = fullMedia.requests.some(
+    const hasActiveAlt = fullMedia.requests.some(
       (request) =>
-        request.is4k &&
+        request.isAlt &&
         request.status !== MediaRequestStatus.COMPLETED &&
         request.status !== MediaRequestStatus.DECLINED
     );
@@ -970,31 +1192,32 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
       fullMedia.status !== MediaStatus.AVAILABLE &&
       fullMedia.status !== MediaStatus.PARTIALLY_AVAILABLE;
 
-    const needs4kStatusUpdate =
-      !hasActive4k &&
-      fullMedia.status4k !== MediaStatus.AVAILABLE &&
-      fullMedia.status4k !== MediaStatus.PARTIALLY_AVAILABLE;
+    const needsAltStatusUpdate =
+      !hasActiveAlt &&
+      fullMedia.statusAlt !== MediaStatus.AVAILABLE &&
+      fullMedia.statusAlt !== MediaStatus.PARTIALLY_AVAILABLE;
 
-    if (needsStatusUpdate || needs4kStatusUpdate) {
-      // Re-fetch WITHOUT requests to avoid cascade issues on save
+    if (needsStatusUpdate || needsAltStatusUpdate) {
       const cleanMedia = await manager.findOneOrFail(Media, {
         where: { id: entity.media.id },
       });
 
       if (needsStatusUpdate) {
         const hadCompleted = fullMedia.requests.some(
-          (r) => !r.is4k && r.status === MediaRequestStatus.COMPLETED
+          (request) =>
+            !request.isAlt && request.status === MediaRequestStatus.COMPLETED
         );
         cleanMedia.status = hadCompleted
           ? MediaStatus.DELETED
           : MediaStatus.UNKNOWN;
       }
 
-      if (needs4kStatusUpdate) {
-        const hadCompleted4k = fullMedia.requests.some(
-          (r) => r.is4k && r.status === MediaRequestStatus.COMPLETED
+      if (needsAltStatusUpdate) {
+        const hadCompletedAlt = fullMedia.requests.some(
+          (request) =>
+            request.isAlt && request.status === MediaRequestStatus.COMPLETED
         );
-        cleanMedia.status4k = hadCompleted4k
+        cleanMedia.statusAlt = hadCompletedAlt
           ? MediaStatus.DELETED
           : MediaStatus.UNKNOWN;
       }
@@ -1008,37 +1231,22 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
       return;
     }
 
-    try {
-      await this.sendToRadarr(event.entity as MediaRequest);
-      await this.sendToSonarr(event.entity as MediaRequest);
-    } catch (e) {
-      logger.error('Error while sending to *arr in afterUpdate subscriber', {
-        label: 'Media Request',
-        requestId: (event.entity as MediaRequest).id,
-        errorMessage: e instanceof Error ? e.message : String(e),
-      });
-    }
+    await this.sendToRadarr(event.entity as MediaRequest);
+    await this.sendToSonarr(event.entity as MediaRequest);
+    await this.sendToReadarr(event.entity as MediaRequest);
 
-    try {
-      await this.updateParentStatus(event.entity as MediaRequest);
+    await this.updateParentStatus(event.entity as MediaRequest);
 
-      if (event.entity.status === MediaRequestStatus.COMPLETED) {
-        if (event.entity.media.mediaType === MediaType.MOVIE) {
-          await this.notifyAvailableMovie(event.entity as MediaRequest, event);
-        }
-        if (event.entity.media.mediaType === MediaType.TV) {
-          await this.notifyAvailableSeries(event.entity as MediaRequest, event);
-        }
+    if (event.entity.status === MediaRequestStatus.COMPLETED) {
+      if (event.entity.media.mediaType === MediaType.MOVIE) {
+        await this.notifyAvailableMovie(event.entity as MediaRequest, event);
       }
-    } catch (e) {
-      logger.error(
-        'Error while updating parent status in afterUpdate subscriber',
-        {
-          label: 'Media Request',
-          requestId: (event.entity as MediaRequest).id,
-          errorMessage: e instanceof Error ? e.message : String(e),
-        }
-      );
+      if (event.entity.media.mediaType === MediaType.TV) {
+        await this.notifyAvailableSeries(event.entity as MediaRequest, event);
+      }
+      if (event.entity.media.mediaType === MediaType.BOOK) {
+        await this.notifyAvailableBook(event.entity as MediaRequest, event);
+      }
     }
   }
 
@@ -1047,29 +1255,11 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
       return;
     }
 
-    try {
-      await this.sendToRadarr(event.entity as MediaRequest);
-      await this.sendToSonarr(event.entity as MediaRequest);
-    } catch (e) {
-      logger.error('Error while sending to *arr in afterInsert subscriber', {
-        label: 'Media Request',
-        requestId: (event.entity as MediaRequest).id,
-        errorMessage: e instanceof Error ? e.message : String(e),
-      });
-    }
+    await this.sendToRadarr(event.entity as MediaRequest);
+    await this.sendToSonarr(event.entity as MediaRequest);
+    await this.sendToReadarr(event.entity as MediaRequest);
 
-    try {
-      await this.updateParentStatus(event.entity as MediaRequest);
-    } catch (e) {
-      logger.error(
-        'Error while updating parent status in afterInsert subscriber',
-        {
-          label: 'Media Request',
-          requestId: (event.entity as MediaRequest).id,
-          errorMessage: e instanceof Error ? e.message : String(e),
-        }
-      );
-    }
+    await this.updateParentStatus(event.entity as MediaRequest);
   }
 
   public async afterRemove(event: RemoveEvent<MediaRequest>): Promise<void> {

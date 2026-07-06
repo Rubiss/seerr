@@ -2,8 +2,7 @@ import Modal from '@app/components/Common/Modal';
 import globalMessages from '@app/i18n/globalMessages';
 import defineMessages from '@app/utils/defineMessages';
 import { Transition } from '@headlessui/react';
-
-import type { Collection } from '@server/models/Collection';
+import type { BookDetails } from '@server/models/Book';
 import type { MovieDetails } from '@server/models/Movie';
 import type { TvDetails } from '@server/models/Tv';
 import axios from 'axios';
@@ -11,8 +10,8 @@ import { useEffect, useState } from 'react';
 import { useIntl } from 'react-intl';
 
 interface BlocklistModalProps {
-  tmdbId: number;
-  type: 'movie' | 'tv' | 'collection';
+  externalId: number;
+  type: 'movie' | 'tv' | 'collection' | 'book';
   show: boolean;
   onComplete?: () => void;
   onCancel?: () => void;
@@ -23,25 +22,22 @@ const messages = defineMessages('component.BlocklistModal', {
   blocklisting: 'Blocklisting',
 });
 
-const isCollection = (
-  data: MovieDetails | TvDetails | Collection | null
-): data is Collection => {
-  return (
-    data !== null &&
-    data !== undefined &&
-    (data as Collection).parts !== undefined
-  );
-};
-
 const isMovie = (
-  movie: MovieDetails | TvDetails | Collection | null
+  movie: MovieDetails | TvDetails | BookDetails | null
 ): movie is MovieDetails => {
   if (!movie) return false;
   return (movie as MovieDetails).title !== undefined;
 };
 
+const isBook = (
+  item: MovieDetails | TvDetails | BookDetails | null
+): item is BookDetails => {
+  if (!item) return false;
+  return (item as BookDetails).id !== undefined && 'author' in item;
+};
+
 const BlocklistModal = ({
-  tmdbId,
+  externalId,
   type,
   show,
   onComplete,
@@ -50,7 +46,7 @@ const BlocklistModal = ({
 }: BlocklistModalProps) => {
   const intl = useIntl();
   const [data, setData] = useState<
-    TvDetails | MovieDetails | Collection | null
+    TvDetails | MovieDetails | BookDetails | null
   >(null);
   const [error, setError] = useState(null);
 
@@ -59,13 +55,13 @@ const BlocklistModal = ({
       if (!show) return;
       try {
         setError(null);
-        const response = await axios.get(`/api/v1/${type}/${tmdbId}`);
+        const response = await axios.get(`/api/v1/${type}/${externalId}`);
         setData(response.data);
       } catch (err) {
         setError(err);
       }
     })();
-  }, [show, tmdbId, type]);
+  }, [show, externalId, type]);
 
   return (
     <Transition
@@ -82,18 +78,14 @@ const BlocklistModal = ({
         loading={!data && !error}
         backgroundClickable
         title={`${intl.formatMessage(globalMessages.blocklist)} ${
-          type === 'collection'
-            ? intl.formatMessage(globalMessages.collection)
-            : isMovie(data)
+          type === 'book'
+            ? intl.formatMessage(globalMessages.book)
+            : type === 'movie'
               ? intl.formatMessage(globalMessages.movie)
               : intl.formatMessage(globalMessages.tvshow)
         }`}
         subTitle={`${
-          isCollection(data)
-            ? data.name
-            : isMovie(data)
-              ? data.title
-              : data?.name
+          isMovie(data) ? data.title : isBook(data) ? data.title : data?.name
         }`}
         onCancel={onCancel}
         onOk={onComplete}
@@ -104,7 +96,8 @@ const BlocklistModal = ({
         }
         okButtonType="danger"
         okDisabled={isUpdating}
-        backdrop={`https://image.tmdb.org/t/p/w1920_and_h800_multi_faces/${data?.backdropPath}`}
+        backdrop={data?.backdropPath}
+        cache={type === 'book' ? 'hardcover' : 'tmdb'}
       />
     </Transition>
   );

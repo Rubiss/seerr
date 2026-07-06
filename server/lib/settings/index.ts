@@ -8,7 +8,7 @@ import { mergeWith } from 'lodash';
 import path from 'path';
 import webpush from 'web-push';
 
-// Prevents stale array entries when incoming data has fewer elements
+// Prevents stale array entries when incoming settings have fewer elements.
 const mergeSettings = <T>(current: T, incoming: Partial<T>): T =>
   mergeWith({}, current, incoming, (_objValue, srcValue) =>
     Array.isArray(srcValue) ? srcValue : undefined
@@ -77,7 +77,6 @@ export interface DVRSettings {
   activeProfileName: string;
   activeDirectory: string;
   tags: number[];
-  is4k: boolean;
   isDefault: boolean;
   externalUrl?: string;
   syncEnabled: boolean;
@@ -88,6 +87,7 @@ export interface DVRSettings {
 
 export interface RadarrSettings extends DVRSettings {
   minimumAvailability: string;
+  is4k: boolean;
 }
 
 export interface SonarrSettings extends DVRSettings {
@@ -100,7 +100,14 @@ export interface SonarrSettings extends DVRSettings {
   activeLanguageProfileId?: number;
   animeTags?: number[];
   enableSeasonFolders: boolean;
+  is4k: boolean;
   monitorNewItems: 'all' | 'none';
+}
+
+export interface ReadarrSettings extends DVRSettings {
+  activeMetadataProfileId: number;
+  activeMetadataProfileName: string;
+  isAudio: boolean;
 }
 
 interface Quota {
@@ -131,6 +138,7 @@ export interface ProxySettings {
 
 export interface MainSettings {
   apiKey: string;
+  hardcoverapikey: string;
   applicationTitle: string;
   applicationUrl: string;
   cacheImages: boolean;
@@ -138,6 +146,7 @@ export interface MainSettings {
   defaultQuotas: {
     movie: Quota;
     tv: Quota;
+    book: Quota;
   };
   hideAvailable: boolean;
   hideBlocklisted: boolean;
@@ -197,6 +206,7 @@ interface FullPublicSettings extends PublicSettings {
   mediaServerLogin: boolean;
   movie4kEnabled: boolean;
   series4kEnabled: boolean;
+  bookAudioEnabled: boolean;
   discoverRegion: string;
   streamingRegion: string;
   originalLanguage: string;
@@ -255,7 +265,6 @@ export interface NotificationAgentEmail extends NotificationAgentConfig {
     authPass?: string;
     allowSelfSigned: boolean;
     senderName: string;
-    usePublicLogo: boolean;
     pgpPrivateKey?: string;
     pgpPassword?: string;
   };
@@ -360,6 +369,7 @@ export type JobId =
   | 'plex-refresh-token'
   | 'radarr-scan'
   | 'sonarr-scan'
+  | 'readarr-scan'
   | 'download-sync'
   | 'download-sync-reset'
   | 'jellyfin-recently-added-scan'
@@ -379,6 +389,7 @@ export interface AllSettings {
   tautulli: TautulliSettings;
   radarr: RadarrSettings[];
   sonarr: SonarrSettings[];
+  readarr: ReadarrSettings[];
   public: PublicSettings;
   notifications: NotificationSettings;
   jobs: Record<JobId, JobSettings>;
@@ -393,7 +404,6 @@ const SETTINGS_PATH = process.env.CONFIG_DIRECTORY
 
 class Settings {
   private data: AllSettings;
-  private saveLock: Promise<void> = Promise.resolve();
 
   constructor(initialSettings?: AllSettings) {
     this.data = {
@@ -403,6 +413,7 @@ class Settings {
       vapidPublic: '',
       main: {
         apiKey: '',
+        hardcoverapikey: '',
         applicationTitle: 'Seerr',
         applicationUrl: '',
         cacheImages: false,
@@ -410,6 +421,7 @@ class Settings {
         defaultQuotas: {
           movie: {},
           tv: {},
+          book: {},
         },
         hideAvailable: false,
         hideBlocklisted: false,
@@ -455,6 +467,7 @@ class Settings {
       },
       radarr: [],
       sonarr: [],
+      readarr: [],
       public: {
         initialized: false,
       },
@@ -473,7 +486,6 @@ class Settings {
               requireTls: false,
               allowSelfSigned: false,
               senderName: 'Seerr',
-              usePublicLogo: false,
             },
           },
           discord: {
@@ -582,6 +594,9 @@ class Settings {
           schedule: '0 0 4 * * *',
         },
         'sonarr-scan': {
+          schedule: '0 30 4 * * *',
+        },
+        'readarr-scan': {
           schedule: '0 30 4 * * *',
         },
         'availability-sync': {
@@ -693,6 +708,14 @@ class Settings {
     this.data.sonarr = data;
   }
 
+  get readarr(): ReadarrSettings[] {
+    return this.data.readarr;
+  }
+
+  set readarr(data: ReadarrSettings[]) {
+    this.data.readarr = data;
+  }
+
   get public(): PublicSettings {
     return this.data.public;
   }
@@ -718,6 +741,9 @@ class Settings {
       series4kEnabled: this.data.sonarr.some(
         (sonarr) => sonarr.is4k && sonarr.isDefault
       ),
+      bookAudioEnabled: this.data.readarr.some(
+        (readarr) => readarr.isAudio && readarr.isDefault
+      ),
       discoverRegion: this.data.main.discoverRegion,
       streamingRegion: this.data.main.streamingRegion,
       originalLanguage: this.data.main.originalLanguage,
@@ -733,7 +759,7 @@ class Settings {
         this.data.notifications.agents.email.options.userEmailRequired,
       newPlexLogin: this.data.main.newPlexLogin,
       youtubeUrl: this.data.main.youtubeUrl,
-      plexClientIdentifier: this.data.clientId,
+      plexClientIdentifier: this.clientId,
     };
   }
 
@@ -805,7 +831,6 @@ class Settings {
    * This will load settings from file unless an optional argument of the object structure
    * is passed in.
    * @param overrideSettings If passed in, will override all existing settings with these
-   * @param raw If true, will load the settings without running migrations or generating missing
    * values
    */
   public async load(
@@ -824,22 +849,16 @@ class Settings {
       await this.save();
     }
 
-    let change = false;
     if (data && !raw) {
       const parsedJson = JSON.parse(data);
       const migratedData = await runMigrations(parsedJson, SETTINGS_PATH);
-      const merged = mergeSettings(this.data, migratedData);
-
-      if (JSON.stringify(merged) !== JSON.stringify(migratedData)) {
-        change = true;
-      }
-
-      this.data = merged;
+      this.data = mergeSettings(this.data, migratedData);
     } else if (data) {
       this.data = JSON.parse(data);
     }
 
     // generate keys and ids if it's missing
+    let change = false;
     if (!this.data.main.apiKey) {
       this.data.main.apiKey = this.generateApiKey();
       change = true;
@@ -870,17 +889,9 @@ class Settings {
   }
 
   public async save(): Promise<void> {
-    const savePromise = this.saveLock.then(async () => {
-      const tmp = SETTINGS_PATH + '.tmp';
-      await fs.writeFile(tmp, JSON.stringify(this.data, undefined, ' '));
-      await fs.rename(tmp, SETTINGS_PATH);
-    });
-
-    this.saveLock = savePromise.catch(() => {
-      // Keep the chain alive so future saves aren't blocked by past failures
-    });
-
-    return savePromise;
+    const tmp = SETTINGS_PATH + '.tmp';
+    await fs.writeFile(tmp, JSON.stringify(this.data, undefined, ' '));
+    await fs.rename(tmp, SETTINGS_PATH);
   }
 }
 

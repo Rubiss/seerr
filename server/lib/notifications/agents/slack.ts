@@ -1,6 +1,4 @@
 import { IssueStatus, IssueTypeName } from '@server/constants/issue';
-import { getIntl } from '@server/i18n';
-import globalMessages from '@server/i18n/globalMessages';
 import type { NotificationAgentSlack } from '@server/lib/settings';
 import { getSettings } from '@server/lib/settings';
 import logger from '@server/logger';
@@ -65,66 +63,63 @@ class SlackAgent
     type: Notification,
     payload: NotificationPayload
   ): SlackBlockEmbed {
-    const settings = this.getSettings();
-    const intl = getIntl(settings.options.locale);
-    const { applicationUrl, applicationTitle } = getSettings().main;
-    const embedPoster = settings.embedPoster;
+    const settings = getSettings();
+    const { applicationUrl, applicationTitle } = settings.main;
+    const { embedPoster } = settings.notifications.agents.slack;
 
     const fields: EmbedField[] = [];
 
     if (payload.request) {
       fields.push({
         type: 'mrkdwn',
-        text: `*${intl.formatMessage(globalMessages.requestedBy)}*\n${payload.request.requestedBy.displayName}`,
+        text: `*Requested By*\n${payload.request.requestedBy.displayName}`,
       });
 
       let status = '';
       switch (type) {
         case Notification.MEDIA_PENDING:
-          status = intl.formatMessage(globalMessages.pendingApproval);
+          status = 'Pending Approval';
           break;
         case Notification.MEDIA_APPROVED:
         case Notification.MEDIA_AUTO_APPROVED:
-          status = intl.formatMessage(globalMessages.processing);
+          status = 'Processing';
           break;
         case Notification.MEDIA_AVAILABLE:
-          status = intl.formatMessage(globalMessages.available);
+          status = 'Available';
           break;
         case Notification.MEDIA_DECLINED:
-          status = intl.formatMessage(globalMessages.declined);
+          status = 'Declined';
           break;
         case Notification.MEDIA_FAILED:
-          status = intl.formatMessage(globalMessages.failed);
+          status = 'Failed';
           break;
       }
 
       if (status) {
         fields.push({
           type: 'mrkdwn',
-          text: `*${intl.formatMessage(globalMessages.requestStatus)}*\n${status}`,
+          text: `*Request Status*\n${status}`,
         });
       }
     } else if (payload.comment) {
       fields.push({
         type: 'mrkdwn',
-        text: `*${intl.formatMessage(globalMessages.commentFrom, { userName: payload.comment.user.displayName })}*\n${payload.comment.message}`,
+        text: `*Comment from ${payload.comment.user.displayName}*\n${payload.comment.message}`,
       });
     } else if (payload.issue) {
       fields.push(
         {
           type: 'mrkdwn',
-          text: `*${intl.formatMessage(globalMessages.reportedBy)}*\n${payload.issue.createdBy.displayName}`,
+          text: `*Reported By*\n${payload.issue.createdBy.displayName}`,
         },
         {
           type: 'mrkdwn',
-          text: `*${intl.formatMessage(globalMessages.issueType)}*\n${IssueTypeName[payload.issue.issueType]}`,
+          text: `*Issue Type*\n${IssueTypeName[payload.issue.issueType]}`,
         },
         {
           type: 'mrkdwn',
-          text: `*${intl.formatMessage(globalMessages.issueStatus)}*\n${
-            payload.issue.status === IssueStatus.OPEN
-              ? intl.formatMessage(globalMessages.open)
-              : intl.formatMessage(globalMessages.resolved)
+          text: `*Issue Status*\n${
+            payload.issue.status === IssueStatus.OPEN ? 'Open' : 'Resolved'
           }`,
         }
       );
@@ -188,7 +183,11 @@ class SlackAgent
       ? payload.issue
         ? `${applicationUrl}/issues/${payload.issue.id}`
         : payload.media
-          ? `${applicationUrl}/${payload.media.mediaType}/${payload.media.tmdbId}`
+          ? `${applicationUrl}/${payload.media.mediaType}/${
+              payload.media.mediaType === 'book'
+                ? payload.media.hcId
+                : payload.media.tmdbId
+            }`
           : undefined
       : undefined;
 
@@ -202,12 +201,9 @@ class SlackAgent
             url,
             text: {
               type: 'plain_text',
-              text: intl.formatMessage(
-                payload.issue
-                  ? globalMessages.viewIssue
-                  : globalMessages.viewMedia,
-                { applicationTitle }
-              ),
+              text: `View ${
+                payload.issue ? 'Issue' : 'Media'
+              } in ${applicationTitle}`,
             },
           },
         ],
