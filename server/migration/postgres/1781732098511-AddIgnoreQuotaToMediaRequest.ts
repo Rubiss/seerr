@@ -4,14 +4,18 @@ export class AddIgnoreQuotaToMediaRequest1781732098511 implements MigrationInter
   name = 'AddIgnoreQuotaToMediaRequest1781732098511';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(
-      `ALTER TABLE "media_request" ADD "ignoreQuota" boolean NOT NULL DEFAULT false`
-    );
+    if (!(await queryRunner.hasColumn('media_request', 'ignoreQuota'))) {
+      await queryRunner.query(
+        `ALTER TABLE "media_request" ADD "ignoreQuota" boolean NOT NULL DEFAULT false`
+      );
+    }
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(
-      `ALTER TABLE "media_request" DROP COLUMN "ignoreQuota"`
-    );
+    if (await queryRunner.hasColumn('media_request', 'ignoreQuota')) {
+      await queryRunner.query(
+        `ALTER TABLE "media_request" DROP COLUMN "ignoreQuota"`
+      );
+    }
   }
 }

@@ -24,6 +24,7 @@ import clearCookies from '@server/middleware/clearcookies';
 import routes from '@server/routes';
 import avatarproxy from '@server/routes/avatarproxy';
 import imageproxy from '@server/routes/imageproxy';
+import webhookRoutes from '@server/routes/webhook';
 import { appDataPermissions } from '@server/utils/appDataVolume';
 import { getAppVersion } from '@server/utils/appVersion';
 import createCustomProxyAgent, {
@@ -192,6 +193,10 @@ app
         next();
       }
     });
+    // Import callbacks authenticate with an API key and do not use browser
+    // sessions or CSRF tokens. The router validates its own import payloads.
+    server.use('/api/v1/webhook', webhookRoutes);
+
     if (settings.network.csrfProtection) {
       server.use(
         csurf({

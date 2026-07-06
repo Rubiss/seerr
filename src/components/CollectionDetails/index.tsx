@@ -56,16 +56,18 @@ const CollectionDetails = ({ collection }: CollectionDetailsProps) => {
   const { addToast } = useToasts();
 
   const returnCollectionDownloadItems = (data: Collection | undefined) => {
-    const [downloadStatus, downloadStatus4k] = [
+    const [downloadStatus, downloadStatusAlt] = [
       data?.parts.flatMap((item) =>
         item.mediaInfo?.downloadStatus ? item.mediaInfo?.downloadStatus : []
       ),
       data?.parts.flatMap((item) =>
-        item.mediaInfo?.downloadStatus4k ? item.mediaInfo?.downloadStatus4k : []
+        item.mediaInfo?.downloadStatusAlt
+          ? item.mediaInfo?.downloadStatusAlt
+          : []
       ),
     ];
 
-    return { downloadStatus, downloadStatus4k };
+    return { downloadStatus, downloadStatusAlt };
   };
 
   const {
@@ -141,9 +143,9 @@ const CollectionDetails = ({ collection }: CollectionDetailsProps) => {
     setIsBlocklistUpdating(false);
   };
 
-  const [downloadStatus, downloadStatus4k] = useMemo(() => {
+  const [downloadStatus, downloadStatusAlt] = useMemo(() => {
     const downloadItems = returnCollectionDownloadItems(data);
-    return [downloadItems.downloadStatus, downloadItems.downloadStatus4k];
+    return [downloadItems.downloadStatus, downloadItems.downloadStatusAlt];
   }, [data]);
 
   const [titles, titles4k] = useMemo(() => {
@@ -152,7 +154,9 @@ const CollectionDetails = ({ collection }: CollectionDetailsProps) => {
         .filter((media) => (media.mediaInfo?.downloadStatus ?? []).length > 0)
         .map((title) => title.title),
       data?.parts
-        .filter((media) => (media.mediaInfo?.downloadStatus4k ?? []).length > 0)
+        .filter(
+          (media) => (media.mediaInfo?.downloadStatusAlt ?? []).length > 0
+        )
         .map((title) => title.title),
     ];
   }, [data?.parts]);
@@ -199,14 +203,14 @@ const CollectionDetails = ({ collection }: CollectionDetailsProps) => {
     data.parts.length > 0 &&
     data.parts.every(
       (part) =>
-        part.mediaInfo && part.mediaInfo.status4k === MediaStatus.AVAILABLE
+        part.mediaInfo && part.mediaInfo.statusAlt === MediaStatus.AVAILABLE
     )
   ) {
     collectionStatus4k = MediaStatus.AVAILABLE;
   } else if (
     data.parts.some(
       (part) =>
-        part.mediaInfo && part.mediaInfo.status4k === MediaStatus.AVAILABLE
+        part.mediaInfo && part.mediaInfo.statusAlt === MediaStatus.AVAILABLE
     )
   ) {
     collectionStatus4k = MediaStatus.PARTIALLY_AVAILABLE;
@@ -225,14 +229,14 @@ const CollectionDetails = ({ collection }: CollectionDetailsProps) => {
 
   const hasRequestable4k =
     settings.currentSettings.movie4kEnabled &&
-    hasPermission([Permission.REQUEST_4K, Permission.REQUEST_4K_MOVIE], {
+    hasPermission([Permission.REQUEST_ALT, Permission.REQUEST_4K_MOVIE], {
       type: 'or',
     }) &&
     data.parts.filter(
       (part) =>
         !part.mediaInfo ||
-        part.mediaInfo.status4k === MediaStatus.DELETED ||
-        part.mediaInfo.status4k === MediaStatus.UNKNOWN
+        part.mediaInfo.statusAlt === MediaStatus.DELETED ||
+        part.mediaInfo.statusAlt === MediaStatus.UNKNOWN
     ).length > 0;
 
   const blocklistVisibility = hasPermission(
@@ -304,10 +308,10 @@ const CollectionDetails = ({ collection }: CollectionDetailsProps) => {
       )}
       <PageTitle title={data.name} />
       <RequestModal
-        tmdbId={data.id}
+        mediaId={data.id}
         show={requestModal}
         type="collection"
-        is4k={is4k}
+        isAlt={is4k}
         onComplete={() => {
           revalidate();
           setRequestModal(false);
@@ -315,7 +319,7 @@ const CollectionDetails = ({ collection }: CollectionDetailsProps) => {
         onCancel={() => setRequestModal(false)}
       />
       <BlocklistModal
-        tmdbId={data.id}
+        externalId={data.id}
         type="collection"
         show={showBlocklistModal}
         onCancel={() => setShowBlocklistModal(false)}
@@ -357,19 +361,19 @@ const CollectionDetails = ({ collection }: CollectionDetailsProps) => {
             />
             {settings.currentSettings.movie4kEnabled &&
               hasPermission(
-                [Permission.REQUEST_4K, Permission.REQUEST_4K_MOVIE],
+                [Permission.REQUEST_ALT, Permission.REQUEST_4K_MOVIE],
                 {
                   type: 'or',
                 }
               ) && (
                 <StatusBadge
                   status={collectionStatus4k}
-                  downloadItem={downloadStatus4k}
+                  downloadItem={downloadStatusAlt}
                   title={titles4k}
-                  is4k
+                  isAlt
                   inProgress={data.parts.some(
                     (part) =>
-                      (part.mediaInfo?.downloadStatus4k ?? []).length > 0
+                      (part.mediaInfo?.downloadStatusAlt ?? []).length > 0
                   )}
                 />
               )}

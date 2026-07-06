@@ -1,3 +1,49 @@
+> [!WARNING]
+>
+> ## Make Backups!
+>
+> ### This fork includes book support and is currently in testing
+>
+> ### Requires you to enter a personal API key in the settings page, dont include Bearer
+>
+> #### If coming from jellyseerr, just copy your config over
+>
+> #### If coming from overseerr, please do the following:
+>
+> 1. Install and run the official Jellyseerr release
+> 2. Using the `db` folder and `settings.json` file follow the instructions on [seerr-database-migration tool](https://github.com/pixelhunterX/seerr-database-migration) to migrate
+> 3. Copy the generated `db` folder and `settings.json` file from the migration tool to this fork
+>
+> #### Be aware that once used with this fork, your database wont be compatible with the official jellyseerr without intervention
+>
+> #### Tested using [bookshelf](https://github.com/pennydreadful/bookshelf) with the hardcover tag
+>
+> #### Planning to add Chaptarr support once in beta
+>
+> #### Note: Image caching is forced for hardcover
+
+## Immediate book availability
+
+This book-support branch is based on the official Seerr **v3.5.0** release.
+Bookshelf can notify Seerr as soon as an ebook or audiobook is imported. Seerr
+then reads the book's current state from that Bookshelf server, marks the correct
+format available, and completes its approved requests.
+
+For **each** Bookshelf server:
+
+1. Enable **Sync** on its Readarr entry in Seerr's service settings.
+2. In Bookshelf, open **Settings → Connect → Add → Webhook**.
+3. Set the URL to `http://seerr:5055/api/v1/webhook/readarr/<serverId>`, replacing
+   `<serverId>` with that entry's numeric `id` from Seerr's `GET /api/v1/settings/readarr`.
+   Use a Seerr address reachable from Bookshelf; include any configured proxy base path.
+4. Select **POST**, use username `seerr`, and use the **Seerr API key** as the password.
+5. Enable **On Release Import** and **On Upgrade**, then test and save.
+
+Configure ebook and audiobook instances separately with their corresponding
+server IDs. A connection test makes no library changes. Repeated import/upgrade
+events are safe; incomplete imports stay processing. Scheduled scans remain a
+fallback for missed notifications and older library items.
+
 <p align="center">
 <img src="./public/logo_full.svg" alt="Seerr" style="margin: 20px 0;">
 </p>

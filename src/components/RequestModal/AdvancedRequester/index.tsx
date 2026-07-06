@@ -40,6 +40,7 @@ const messages = defineMessages('components.RequestModal.AdvancedRequester', {
   advancedoptions: 'Advanced',
   destinationserver: 'Destination Server',
   qualityprofile: 'Quality Profile',
+  metadataprofile: 'Metadata Profile',
   rootfolder: 'Root Folder',
   animenote: '* This series is an anime.',
   default: '{name} (Default)',
@@ -57,6 +58,7 @@ const messages = defineMessages('components.RequestModal.AdvancedRequester', {
 export type RequestOverrides = {
   server?: number;
   profile?: number;
+  metadataProfile?: number;
   folder?: string;
   tags?: number[];
   language?: number;
@@ -65,9 +67,9 @@ export type RequestOverrides = {
 };
 
 interface AdvancedRequesterProps {
-  type: 'movie' | 'tv';
+  type: 'movie' | 'tv' | 'book';
+  isAlt?: boolean;
   tmdbId?: number;
-  is4k: boolean;
   isAnime?: boolean;
   defaultOverrides?: RequestOverrides;
   requestUser?: User;
@@ -78,8 +80,8 @@ interface AdvancedRequesterProps {
 
 const AdvancedRequester = ({
   type,
+  isAlt = false,
   tmdbId,
-  is4k = false,
   isAnime = false,
   defaultOverrides,
   requestUser,
@@ -91,7 +93,9 @@ const AdvancedRequester = ({
   const { addToast } = useToasts();
   const { user: currentUser, hasPermission: currentHasPermission } = useUser();
   const { data, error } = useSWR<ServiceCommonServer[]>(
-    `/api/v1/service/${type === 'movie' ? 'radarr' : 'sonarr'}`,
+    `/api/v1/service/${
+      type === 'movie' ? 'radarr' : type === 'book' ? 'readarr' : 'sonarr'
+    }`,
     {
       refreshInterval: 0,
       refreshWhenHidden: false,
@@ -107,6 +111,8 @@ const AdvancedRequester = ({
   const [selectedProfile, setSelectedProfile] = useState<number>(
     defaultOverrides?.profile ?? -1
   );
+  const [selectedMetadataProfile, setSelectedMetadataProfile] =
+    useState<number>(defaultOverrides?.metadataProfile ?? -1);
   const [selectedFolder, setSelectedFolder] = useState<string>(
     defaultOverrides?.folder ?? ''
   );
@@ -130,7 +136,7 @@ const AdvancedRequester = ({
     useSWR<ServiceCommonServerWithDetails>(
       selectedServer !== null
         ? `/api/v1/service/${
-            type === 'movie' ? 'radarr' : 'sonarr'
+            type === 'movie' ? 'radarr' : type === 'book' ? 'readarr' : 'sonarr'
           }/${selectedServer}`
         : null,
       {
@@ -151,22 +157,27 @@ const AdvancedRequester = ({
       ? '/api/v1/user?take=1000&sort=displayname'
       : null
   );
+
   const filteredUserData = useMemo(
     () =>
       userData?.results.filter((user) =>
         hasPermission(
-          is4k
+          isAlt
             ? [
-                Permission.REQUEST_4K,
+                Permission.REQUEST_ALT,
                 type === 'movie'
                   ? Permission.REQUEST_4K_MOVIE
-                  : Permission.REQUEST_4K_TV,
+                  : type === 'tv'
+                    ? Permission.REQUEST_4K_TV
+                    : Permission.REQUEST_AUDIO_BOOK,
               ]
             : [
                 Permission.REQUEST,
                 type === 'movie'
                   ? Permission.REQUEST_MOVIE
-                  : Permission.REQUEST_TV,
+                  : type === 'tv'
+                    ? Permission.REQUEST_TV
+                    : Permission.REQUEST_BOOK,
               ],
           user.permissions,
           { type: 'or' }
@@ -190,7 +201,7 @@ const AdvancedRequester = ({
 
   useEffect(() => {
     let defaultServer = data?.find(
-      (server) => server.isDefault && is4k === server.is4k
+      (server) => server.isDefault && isAlt === server.isAlt
     );
 
     if (!defaultServer && (data ?? []).length > 0) {
@@ -229,6 +240,10 @@ const AdvancedRequester = ({
             ? serverData.server.activeAnimeLanguageProfileId
             : serverData.server.activeLanguageProfileId)
       );
+      const defaultMetadataProfile = serverData.metadataProfiles?.find(
+        (metadataProfile) =>
+          metadataProfile.id === serverData.server.activeMetadataProfileId
+      );
       const defaultTags = isAnime
         ? serverData.server.activeAnimeTags
         : serverData.server.activeTags;
@@ -263,6 +278,14 @@ const AdvancedRequester = ({
       }
 
       if (
+        defaultMetadataProfile &&
+        defaultMetadataProfile.id !== selectedMetadataProfile &&
+        (!applyOverrides || defaultOverrides.metadataProfile === null)
+      ) {
+        setSelectedMetadataProfile(defaultMetadataProfile.id);
+      }
+
+      if (
         defaultTags &&
         !isEqual(defaultTags, selectedTags) &&
         (!applyOverrides || defaultOverrides.tags === null)
@@ -289,6 +312,10 @@ const AdvancedRequester = ({
       setSelectedLanguage(defaultOverrides.language);
     }
 
+    if (defaultOverrides && defaultOverrides.metadataProfile != null) {
+      setSelectedMetadataProfile(defaultOverrides.metadataProfile);
+    }
+
     if (defaultOverrides && defaultOverrides.tags != null) {
       setSelectedTags(defaultOverrides.tags);
     }
@@ -301,6 +328,7 @@ const AdvancedRequester = ({
     defaultOverrides?.folder,
     defaultOverrides?.profile,
     defaultOverrides?.language,
+    defaultOverrides?.metadataProfile,
     defaultOverrides?.tags,
     defaultOverrides?.ignoreQuota,
   ]);
@@ -320,6 +348,8 @@ const AdvancedRequester = ({
       onChange({
         folder: selectedFolder !== '' ? selectedFolder : undefined,
         profile: selectedProfile !== -1 ? selectedProfile : undefined,
+        metadataProfile:
+          selectedMetadataProfile !== -1 ? selectedMetadataProfile : undefined,
         server: selectedServer ?? undefined,
         user: selectedUser ?? undefined,
         language: selectedLanguage !== -1 ? selectedLanguage : undefined,
@@ -331,6 +361,7 @@ const AdvancedRequester = ({
     selectedFolder,
     selectedServer,
     selectedProfile,
+    selectedMetadataProfile,
     selectedUser,
     selectedLanguage,
     selectedTags,
@@ -347,7 +378,7 @@ const AdvancedRequester = ({
             '/api/v1/overrideRule/advancedRequest',
             {
               mediaType: type,
-              is4k,
+              is4k: isAlt,
               requestUser:
                 selectedUser?.id ?? requestUser?.id ?? currentUser?.id,
               tmdbId,
@@ -389,7 +420,7 @@ const AdvancedRequester = ({
   }, [
     tmdbId,
     type,
-    is4k,
+    isAlt,
     serverData?.server.id,
     selectedServer,
     selectedUserId,
@@ -411,17 +442,17 @@ const AdvancedRequester = ({
   if (
     (!data ||
       selectedServer === null ||
-      (data.filter((server) => server.is4k === is4k).length < 2 &&
+      (data.filter((server) => server.isAlt === isAlt).length < 2 &&
         (!serverData ||
           (serverData.profiles.length < 2 &&
             serverData.rootFolders.length < 2 &&
             (serverData.languageProfiles ?? []).length < 2 &&
+            (serverData.metadataProfiles ?? []).length < 2 &&
             !serverData.tags?.length)))) &&
     (!selectedUser || (filteredUserData ?? []).length < 2)
   ) {
     return null;
   }
-
   return (
     <>
       <div className="mb-2 mt-4 flex items-center text-lg font-semibold">
@@ -430,7 +461,7 @@ const AdvancedRequester = ({
       <div className="rounded-md">
         {!!data && selectedServer !== null && (
           <div className="flex flex-col md:flex-row">
-            {data.filter((server) => server.is4k === is4k).length > 1 && (
+            {data.filter((server) => server.isAlt === isAlt).length > 1 && (
               <div className="mb-3 w-full flex-shrink-0 flex-grow last:pr-0 md:w-1/4 md:pr-4">
                 <label htmlFor="server">
                   {intl.formatMessage(messages.destinationserver)}
@@ -444,7 +475,7 @@ const AdvancedRequester = ({
                   className="border-gray-700 bg-gray-800"
                 >
                   {data
-                    .filter((server) => server.is4k === is4k)
+                    .filter((server) => server.isAlt === isAlt)
                     .map((server) => (
                       <option
                         key={`server-list-${server.id}`}
@@ -511,6 +542,52 @@ const AdvancedRequester = ({
                 </select>
               </div>
             )}
+            {type === 'book' &&
+              (isValidating ||
+                !serverData ||
+                (serverData.metadataProfiles &&
+                  serverData.metadataProfiles.length > 1)) && (
+                <div className="mb-3 w-full flex-shrink-0 flex-grow last:pr-0 md:w-1/4 md:pr-4">
+                  <label htmlFor="metadataProfile">
+                    {intl.formatMessage(messages.metadataprofile)}
+                  </label>
+                  <select
+                    id="metadataProfile"
+                    name="metadataProfile"
+                    value={selectedMetadataProfile}
+                    onChange={(e) =>
+                      setSelectedMetadataProfile(Number(e.target.value))
+                    }
+                    onBlur={(e) =>
+                      setSelectedMetadataProfile(Number(e.target.value))
+                    }
+                    className="border-gray-700 bg-gray-800"
+                    disabled={isValidating || !serverData}
+                  >
+                    {(isValidating || !serverData) && (
+                      <option value="">
+                        {intl.formatMessage(globalMessages.loading)}
+                      </option>
+                    )}
+                    {!isValidating &&
+                      serverData &&
+                      serverData.metadataProfiles &&
+                      serverData.metadataProfiles.map((metadataProfile) => (
+                        <option
+                          key={`metadata-profile-list${metadataProfile.id}`}
+                          value={metadataProfile.id}
+                        >
+                          {serverData.server.activeMetadataProfileId ===
+                          metadataProfile.id
+                            ? intl.formatMessage(messages.default, {
+                                name: metadataProfile.name,
+                              })
+                            : metadataProfile.name}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              )}
             {(isValidating ||
               !serverData ||
               serverData.rootFolders.length > 1) && (

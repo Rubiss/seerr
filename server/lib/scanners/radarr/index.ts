@@ -207,7 +207,7 @@ class RadarrScanner
       });
 
       for (const media of processingMovies) {
-        if (!this.scannedTmdbIds.has(media.tmdbId)) {
+        if (media.tmdbId && !this.scannedTmdbIds.has(media.tmdbId)) {
           if (await this.existsInAnyServer(media.tmdbId, false)) {
             continue;
           }
@@ -232,18 +232,18 @@ class RadarrScanner
       const processing4kMovies = await mediaRepository.find({
         where: {
           mediaType: MediaType.MOVIE,
-          status4k: MediaStatus.PROCESSING,
+          statusAlt: MediaStatus.PROCESSING,
         },
         relations: { requests: true },
       });
 
       for (const media of processing4kMovies) {
-        if (!this.scanned4kTmdbIds.has(media.tmdbId)) {
+        if (media.tmdbId && !this.scanned4kTmdbIds.has(media.tmdbId)) {
           if (await this.existsInAnyServer(media.tmdbId, true)) {
             continue;
           }
 
-          media.status4k = MediaStatus.UNKNOWN;
+          media.statusAlt = MediaStatus.UNKNOWN;
           await mediaRepository.save(media);
           await this.declineOrphanedRequests(media, true);
           this.log(

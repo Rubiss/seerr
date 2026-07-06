@@ -143,7 +143,7 @@ const TvDetails = ({ tv }: TvDetailsProps) => {
     refreshInterval: refreshIntervalHelper(
       {
         downloadStatus: tv?.mediaInfo?.downloadStatus,
-        downloadStatus4k: tv?.mediaInfo?.downloadStatus4k,
+        downloadStatusAlt: tv?.mediaInfo?.downloadStatusAlt,
       },
       15000
     ),
@@ -173,11 +173,11 @@ const TvDetails = ({ tv }: TvDetailsProps) => {
     []
   );
 
-  const { mediaUrl: plexUrl, mediaUrl4k: plexUrl4k } = useDeepLinks({
+  const { mediaUrl: plexUrl, mediaUrlAlt: plexUrl4k } = useDeepLinks({
     mediaUrl: data?.mediaInfo?.mediaUrl,
-    mediaUrl4k: data?.mediaInfo?.mediaUrl4k,
+    mediaUrlAlt: data?.mediaInfo?.mediaUrlAlt,
     iOSPlexUrl: data?.mediaInfo?.iOSPlexUrl,
-    iOSPlexUrl4k: data?.mediaInfo?.iOSPlexUrl4k,
+    iOSPlexUrlAlt: data?.mediaInfo?.iOSPlexUrlAlt,
   });
 
   if (!data && !error) {
@@ -206,7 +206,7 @@ const TvDetails = ({ tv }: TvDetailsProps) => {
   if (
     settings.currentSettings.series4kEnabled &&
     plexUrl4k &&
-    hasPermission([Permission.REQUEST_4K, Permission.REQUEST_4K_TV], {
+    hasPermission([Permission.REQUEST_ALT, Permission.REQUEST_4K_TV], {
       type: 'or',
     })
   ) {
@@ -374,7 +374,7 @@ const TvDetails = ({ tv }: TvDetailsProps) => {
 
     try {
       await axios.post('/api/v1/watchlist', {
-        tmdbId: tv?.id,
+        externalId: tv?.id,
         mediaType: MediaType.TV,
         title: tv?.name,
       });
@@ -435,7 +435,7 @@ const TvDetails = ({ tv }: TvDetailsProps) => {
 
     try {
       const res = await axios.post('/api/v1/blocklist', {
-        tmdbId: tv?.id,
+        externalId: tv?.id,
         mediaType: 'tv',
         title: tv?.name,
         user: user?.id,
@@ -493,7 +493,7 @@ const TvDetails = ({ tv }: TvDetailsProps) => {
           <CachedImage
             type="tmdb"
             alt=""
-            src={`https://image.tmdb.org/t/p/w1920_and_h800_multi_faces/${data.backdropPath}`}
+            src={data.backdropPath}
             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
             fill
             priority
@@ -509,7 +509,7 @@ const TvDetails = ({ tv }: TvDetailsProps) => {
       )}
       <PageTitle title={data.name} />
       <BlocklistModal
-        tmdbId={data.id}
+        externalId={data.id}
         type="tv"
         show={showBlocklistModal}
         onCancel={closeBlocklistModal}
@@ -520,10 +520,10 @@ const TvDetails = ({ tv }: TvDetailsProps) => {
         onCancel={() => setShowIssueModal(false)}
         show={showIssueModal}
         mediaType="tv"
-        tmdbId={data.id}
+        mediaId={data.id}
       />
       <RequestModal
-        tmdbId={data.id}
+        mediaId={data.id}
         show={showRequestModal}
         type="tv"
         onComplete={() => {
@@ -551,7 +551,7 @@ const TvDetails = ({ tv }: TvDetailsProps) => {
             type="tmdb"
             src={
               data.posterPath
-                ? `https://image.tmdb.org/t/p/w600_and_h900_bestv2${data.posterPath}`
+                ? data.posterPath
                 : '/images/seerr_poster_not_found.png'
             }
             alt=""
@@ -569,7 +569,7 @@ const TvDetails = ({ tv }: TvDetailsProps) => {
               downloadItem={data.mediaInfo?.downloadStatus}
               title={data.name}
               inProgress={(data.mediaInfo?.downloadStatus ?? []).length > 0}
-              tmdbId={data.mediaInfo?.tmdbId}
+              mediaId={data.mediaInfo?.tmdbId}
               mediaType="tv"
               plexUrl={plexUrl}
               serviceUrl={data.mediaInfo?.serviceUrl}
@@ -578,7 +578,7 @@ const TvDetails = ({ tv }: TvDetailsProps) => {
               hasPermission(
                 [
                   Permission.MANAGE_REQUESTS,
-                  Permission.REQUEST_4K,
+                  Permission.REQUEST_ALT,
                   Permission.REQUEST_4K_TV,
                 ],
                 {
@@ -586,17 +586,17 @@ const TvDetails = ({ tv }: TvDetailsProps) => {
                 }
               ) && (
                 <StatusBadge
-                  status={data.mediaInfo?.status4k}
-                  downloadItem={data.mediaInfo?.downloadStatus4k}
+                  status={data.mediaInfo?.statusAlt}
+                  downloadItem={data.mediaInfo?.downloadStatusAlt}
                   title={data.name}
-                  is4k
+                  isAlt
                   inProgress={
-                    (data.mediaInfo?.downloadStatus4k ?? []).length > 0
+                    (data.mediaInfo?.downloadStatusAlt ?? []).length > 0
                   }
-                  tmdbId={data.mediaInfo?.tmdbId}
+                  mediaId={data.mediaInfo?.tmdbId}
                   mediaType="tv"
                   plexUrl={plexUrl4k}
-                  serviceUrl={data.mediaInfo?.serviceUrl4k}
+                  serviceUrl={data.mediaInfo?.serviceUrlAlt}
                 />
               )}
           </div>
@@ -682,7 +682,7 @@ const TvDetails = ({ tv }: TvDetailsProps) => {
           <RequestButton
             mediaType="tv"
             onUpdate={() => revalidate()}
-            tmdbId={data?.id}
+            mediaId={data?.id}
             media={data?.mediaInfo}
             isShowComplete={isComplete}
             is4kShowComplete={is4kComplete}
@@ -690,11 +690,14 @@ const TvDetails = ({ tv }: TvDetailsProps) => {
           {(data.mediaInfo?.status === MediaStatus.AVAILABLE ||
             data.mediaInfo?.status === MediaStatus.PARTIALLY_AVAILABLE ||
             (settings.currentSettings.series4kEnabled &&
-              hasPermission([Permission.REQUEST_4K, Permission.REQUEST_4K_TV], {
-                type: 'or',
-              }) &&
-              (data.mediaInfo?.status4k === MediaStatus.AVAILABLE ||
-                data?.mediaInfo?.status4k ===
+              hasPermission(
+                [Permission.REQUEST_ALT, Permission.REQUEST_4K_TV],
+                {
+                  type: 'or',
+                }
+              ) &&
+              (data.mediaInfo?.statusAlt === MediaStatus.AVAILABLE ||
+                data?.mediaInfo?.statusAlt ===
                   MediaStatus.PARTIALLY_AVAILABLE))) &&
             hasPermission(
               [Permission.CREATE_ISSUES, Permission.MANAGE_ISSUES],
@@ -816,7 +819,7 @@ const TvDetails = ({ tv }: TvDetailsProps) => {
                   hasPermission(
                     [
                       Permission.MANAGE_REQUESTS,
-                      Permission.REQUEST_4K,
+                      Permission.REQUEST_ALT,
                       Permission.REQUEST_4K_TV,
                     ],
                     {

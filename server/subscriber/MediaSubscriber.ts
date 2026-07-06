@@ -21,7 +21,7 @@ export class MediaSubscriber implements EntitySubscriberInterface<Media> {
   private async updateChildRequestStatus(
     manager: EntityManager,
     event: Media,
-    is4k: boolean
+    isAlt: boolean
   ) {
     const requestRepository = manager.getRepository(MediaRequest);
 
@@ -31,7 +31,7 @@ export class MediaSubscriber implements EntitySubscriberInterface<Media> {
 
     for (const request of requests) {
       if (
-        request.is4k === is4k &&
+        request.isAlt === isAlt &&
         request.status === MediaRequestStatus.PENDING
       ) {
         request.status = MediaRequestStatus.APPROVED;
@@ -44,7 +44,7 @@ export class MediaSubscriber implements EntitySubscriberInterface<Media> {
     manager: EntityManager,
     event: Media,
     databaseEvent: Media,
-    is4k: boolean
+    isAlt: boolean
   ) {
     const requestRepository = manager.getRepository(MediaRequest);
     const seasonRequestRepository = manager.getRepository(SeasonRequest);
@@ -56,7 +56,7 @@ export class MediaSubscriber implements EntitySubscriberInterface<Media> {
       where: {
         media: { id: event.id },
         status: In([MediaRequestStatus.APPROVED, MediaRequestStatus.FAILED]),
-        is4k,
+        isAlt,
       },
     });
 
@@ -69,11 +69,12 @@ export class MediaSubscriber implements EntitySubscriberInterface<Media> {
         let shouldComplete = false;
 
         if (
-          (event[request.is4k ? 'status4k' : 'status'] ===
+          (event[request.isAlt ? 'status4k' : 'status'] ===
             MediaStatus.AVAILABLE ||
-            event[request.is4k ? 'status4k' : 'status'] ===
+            event[request.isAlt ? 'status4k' : 'status'] ===
               MediaStatus.DELETED) &&
-          event.mediaType === MediaType.MOVIE
+          (event.mediaType === MediaType.MOVIE ||
+            event.mediaType === MediaType.BOOK)
         ) {
           shouldComplete = true;
         } else if (event.mediaType === 'tv') {
@@ -96,9 +97,9 @@ export class MediaSubscriber implements EntitySubscriberInterface<Media> {
             }
 
             const currentSeasonStatus =
-              matchingSeason[request.is4k ? 'status4k' : 'status'];
+              matchingSeason[request.isAlt ? 'status4k' : 'status'];
             const previousSeasonStatus =
-              matchingOldSeason?.[request.is4k ? 'status4k' : 'status'];
+              matchingOldSeason?.[request.isAlt ? 'status4k' : 'status'];
 
             const hasStatusChanged =
               currentSeasonStatus !== previousSeasonStatus;
@@ -158,7 +159,7 @@ export class MediaSubscriber implements EntitySubscriberInterface<Media> {
         {
           label: 'Media',
           mediaId: event.entity.id,
-          is4k: false,
+          isAlt: false,
           errorMessage: e instanceof Error ? e.message : String(e),
         }
       );
@@ -166,8 +167,8 @@ export class MediaSubscriber implements EntitySubscriberInterface<Media> {
 
     try {
       if (
-        event.entity.status4k === MediaStatus.AVAILABLE &&
-        event.databaseEntity?.status4k === MediaStatus.PENDING
+        event.entity.statusAlt === MediaStatus.AVAILABLE &&
+        event.databaseEntity?.statusAlt === MediaStatus.PENDING
       ) {
         await withNestedTransaction(event.manager, async (manager) => {
           await this.updateChildRequestStatus(
@@ -183,7 +184,7 @@ export class MediaSubscriber implements EntitySubscriberInterface<Media> {
         {
           label: 'Media',
           mediaId: event.entity.id,
-          is4k: true,
+          isAlt: true,
           errorMessage: e instanceof Error ? e.message : String(e),
         }
       );
@@ -212,13 +213,13 @@ export class MediaSubscriber implements EntitySubscriberInterface<Media> {
       MediaStatus.DELETED,
     ];
 
-    const seasonStatusCheck = (is4k: boolean) => {
+    const seasonStatusCheck = (isAlt: boolean) => {
       return event.entity?.seasons?.some((season: Season, index: number) => {
         const previousSeason = event.databaseEntity.seasons[index];
 
         return (
-          season[is4k ? 'status4k' : 'status'] !==
-          previousSeason?.[is4k ? 'status4k' : 'status']
+          season[isAlt ? 'status4k' : 'status'] !==
+          previousSeason?.[isAlt ? 'status4k' : 'status']
         );
       });
     };
@@ -245,7 +246,7 @@ export class MediaSubscriber implements EntitySubscriberInterface<Media> {
         {
           label: 'Media',
           mediaId: event.entity.id,
-          is4k: false,
+          isAlt: false,
           errorMessage: e instanceof Error ? e.message : String(e),
         }
       );
@@ -253,10 +254,10 @@ export class MediaSubscriber implements EntitySubscriberInterface<Media> {
 
     try {
       if (
-        (event.entity.status4k !== event.databaseEntity?.status4k ||
+        (event.entity.statusAlt !== event.databaseEntity?.statusAlt ||
           (event.entity.mediaType === MediaType.TV &&
             seasonStatusCheck(true))) &&
-        validStatuses.includes(event.entity.status4k)
+        validStatuses.includes(event.entity.statusAlt)
       ) {
         await withNestedTransaction(event.manager, async (manager) => {
           await this.updateRelatedMediaRequest(
@@ -273,7 +274,7 @@ export class MediaSubscriber implements EntitySubscriberInterface<Media> {
         {
           label: 'Media',
           mediaId: event.entity.id,
-          is4k: true,
+          isAlt: true,
           errorMessage: e instanceof Error ? e.message : String(e),
         }
       );

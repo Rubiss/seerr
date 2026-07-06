@@ -307,7 +307,7 @@ class SonarrScanner
 
     if (this.didScan4k) {
       const processing4kShows = await mediaRepository.find({
-        where: { mediaType: MediaType.TV, status4k: MediaStatus.PROCESSING },
+        where: { mediaType: MediaType.TV, statusAlt: MediaStatus.PROCESSING },
         relations: { seasons: true, requests: true },
       });
 
@@ -317,7 +317,7 @@ class SonarrScanner
             continue;
           }
 
-          media.status4k = MediaStatus.UNKNOWN;
+          media.statusAlt = MediaStatus.UNKNOWN;
           for (const season of media.seasons) {
             if (season.status4k === MediaStatus.PROCESSING) {
               season.status4k = MediaStatus.UNKNOWN;

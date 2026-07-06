@@ -198,7 +198,7 @@ class BlocklistedTagProcessor implements RunnableScanner<StatusBase> {
 
     for (const entry of response.results) {
       const blocklistEntry = await blocklistRepository.findOne({
-        where: { tmdbId: entry.id, mediaType },
+        where: { externalId: entry.id, mediaType },
       });
 
       if (blocklistEntry) {
@@ -219,7 +219,7 @@ class BlocklistedTagProcessor implements RunnableScanner<StatusBase> {
             blocklistRequest: {
               mediaType,
               title: 'title' in entry ? entry.title : entry.name,
-              tmdbId: entry.id,
+              externalId: entry.id,
               blocklistedTags: `,${keywordId},`,
             },
           },
@@ -237,7 +237,7 @@ class BlocklistedTagProcessor implements RunnableScanner<StatusBase> {
       .innerJoinAndSelect(
         Blocklist,
         'blist',
-        'blist.tmdbId = media.tmdbId AND blist.mediaType = media.mediaType'
+        'blist.externalId = media.tmdbId AND blist.mediaType = media.mediaType'
       )
       .where(`blist.blocklistedTags IS NOT NULL`)
       .getMany();

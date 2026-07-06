@@ -8,7 +8,7 @@ import { mergeWith } from 'lodash';
 import path from 'path';
 import webpush from 'web-push';
 
-// Prevents stale array entries when incoming data has fewer elements
+// Prevents stale array entries when incoming settings have fewer elements.
 const mergeSettings = <T>(current: T, incoming: Partial<T>): T =>
   mergeWith({}, current, incoming, (_objValue, srcValue) =>
     Array.isArray(srcValue) ? srcValue : undefined
@@ -77,7 +77,6 @@ export interface DVRSettings {
   activeProfileName: string;
   activeDirectory: string;
   tags: number[];
-  is4k: boolean;
   isDefault: boolean;
   externalUrl?: string;
   syncEnabled: boolean;
@@ -88,6 +87,7 @@ export interface DVRSettings {
 
 export interface RadarrSettings extends DVRSettings {
   minimumAvailability: string;
+  is4k: boolean;
 }
 
 export interface SonarrSettings extends DVRSettings {
@@ -100,7 +100,14 @@ export interface SonarrSettings extends DVRSettings {
   activeLanguageProfileId?: number;
   animeTags?: number[];
   enableSeasonFolders: boolean;
+  is4k: boolean;
   monitorNewItems: 'all' | 'none';
+}
+
+export interface ReadarrSettings extends DVRSettings {
+  activeMetadataProfileId: number;
+  activeMetadataProfileName: string;
+  isAudio: boolean;
 }
 
 interface Quota {
@@ -131,6 +138,7 @@ export interface ProxySettings {
 
 export interface MainSettings {
   apiKey: string;
+  hardcoverapikey: string;
   applicationTitle: string;
   applicationUrl: string;
   cacheImages: boolean;
@@ -138,6 +146,7 @@ export interface MainSettings {
   defaultQuotas: {
     movie: Quota;
     tv: Quota;
+    book: Quota;
   };
   hideAvailable: boolean;
   hideBlocklisted: boolean;
@@ -200,6 +209,7 @@ interface FullPublicSettings extends PublicSettings {
   mediaServerLogin: boolean;
   movie4kEnabled: boolean;
   series4kEnabled: boolean;
+  bookAudioEnabled: boolean;
   discoverRegion: string;
   streamingRegion: string;
   originalLanguage: string;
@@ -366,6 +376,7 @@ export type JobId =
   | 'plex-refresh-token'
   | 'radarr-scan'
   | 'sonarr-scan'
+  | 'readarr-scan'
   | 'download-sync'
   | 'download-sync-reset'
   | 'jellyfin-recently-added-scan'
@@ -385,6 +396,7 @@ export interface AllSettings {
   tautulli: TautulliSettings;
   radarr: RadarrSettings[];
   sonarr: SonarrSettings[];
+  readarr: ReadarrSettings[];
   public: PublicSettings;
   notifications: NotificationSettings;
   jobs: Record<JobId, JobSettings>;
@@ -409,6 +421,7 @@ class Settings {
       vapidPublic: '',
       main: {
         apiKey: '',
+        hardcoverapikey: '',
         applicationTitle: 'Seerr',
         applicationUrl: '',
         cacheImages: false,
@@ -416,6 +429,7 @@ class Settings {
         defaultQuotas: {
           movie: {},
           tv: {},
+          book: {},
         },
         hideAvailable: false,
         hideBlocklisted: false,
@@ -463,6 +477,7 @@ class Settings {
       },
       radarr: [],
       sonarr: [],
+      readarr: [],
       public: {
         initialized: false,
       },
@@ -593,6 +608,9 @@ class Settings {
         'sonarr-scan': {
           schedule: '0 30 4 * * *',
         },
+        'readarr-scan': {
+          schedule: '0 30 4 * * *',
+        },
         'availability-sync': {
           schedule: '0 0 5 * * *',
         },
@@ -702,6 +720,14 @@ class Settings {
     this.data.sonarr = data;
   }
 
+  get readarr(): ReadarrSettings[] {
+    return this.data.readarr;
+  }
+
+  set readarr(data: ReadarrSettings[]) {
+    this.data.readarr = data;
+  }
+
   get public(): PublicSettings {
     return this.data.public;
   }
@@ -727,6 +753,9 @@ class Settings {
       ),
       series4kEnabled: this.data.sonarr.some(
         (sonarr) => sonarr.is4k && sonarr.isDefault
+      ),
+      bookAudioEnabled: this.data.readarr.some(
+        (readarr) => readarr.isAudio && readarr.isDefault
       ),
       discoverRegion: this.data.main.discoverRegion,
       streamingRegion: this.data.main.streamingRegion,
@@ -816,7 +845,6 @@ class Settings {
    * This will load settings from file unless an optional argument of the object structure
    * is passed in.
    * @param overrideSettings If passed in, will override all existing settings with these
-   * @param raw If true, will load the settings without running migrations or generating missing
    * values
    */
   public async load(

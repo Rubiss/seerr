@@ -88,7 +88,7 @@ describe('GET /blocklist/:id', () => {
     await getRepository(Blocklist).save(
       new Blocklist({
         mediaType: MediaType.MOVIE,
-        tmdbId: 12345,
+        externalId: 12345,
         title: 'Blocked Movie',
         user: blocklistUser,
         media,

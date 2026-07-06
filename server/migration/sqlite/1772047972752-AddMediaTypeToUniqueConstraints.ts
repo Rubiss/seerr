@@ -4,6 +4,48 @@ export class AddMediaTypeToUniqueConstraints1772047972752 implements MigrationIn
   name = 'AddMediaTypeToUniqueConstraints1772047972752';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
+    const hasBookBlocklistSchema =
+      (await queryRunner.hasTable('blocklist')) &&
+      (await queryRunner.hasColumn('blocklist', 'externalId'));
+
+    if (hasBookBlocklistSchema) {
+      await queryRunner.query(
+        `DROP INDEX IF EXISTS "IDX_939f205946256cc0d2a1ac51a8"`
+      );
+      await queryRunner.query(
+        `DROP INDEX IF EXISTS "IDX_ae34e6b153a90672eb9dc4857d"`
+      );
+      await queryRunner.query(
+        `DROP INDEX IF EXISTS "IDX_6641da8d831b93dfcb429f8b8b"`
+      );
+      await queryRunner.query(
+        `CREATE TABLE "temporary_watchlist" ("id" integer PRIMARY KEY AUTOINCREMENT NOT NULL, "ratingKey" varchar NOT NULL, "mediaType" varchar NOT NULL, "title" varchar NOT NULL, "tmdbId" integer NOT NULL, "createdAt" datetime NOT NULL DEFAULT (CURRENT_TIMESTAMP), "updatedAt" datetime NOT NULL DEFAULT (CURRENT_TIMESTAMP), "requestedById" integer, "mediaId" integer, CONSTRAINT "UNIQUE_USER_DB" UNIQUE ("tmdbId", "mediaType", "requestedById"), CONSTRAINT "FK_6641da8d831b93dfcb429f8b8bc" FOREIGN KEY ("mediaId") REFERENCES "media" ("id") ON DELETE CASCADE ON UPDATE NO ACTION, CONSTRAINT "FK_ae34e6b153a90672eb9dc4857d7" FOREIGN KEY ("requestedById") REFERENCES "user" ("id") ON DELETE CASCADE ON UPDATE NO ACTION)`
+      );
+      await queryRunner.query(
+        `INSERT INTO "temporary_watchlist"("id", "ratingKey", "mediaType", "title", "tmdbId", "createdAt", "updatedAt", "requestedById", "mediaId") SELECT "id", "ratingKey", "mediaType", "title", "tmdbId", "createdAt", "updatedAt", "requestedById", "mediaId" FROM "watchlist"`
+      );
+      await queryRunner.query(`DROP TABLE "watchlist"`);
+      await queryRunner.query(
+        `ALTER TABLE "temporary_watchlist" RENAME TO "watchlist"`
+      );
+      await queryRunner.query(
+        `CREATE INDEX IF NOT EXISTS "IDX_939f205946256cc0d2a1ac51a8" ON "watchlist" ("tmdbId")`
+      );
+      await queryRunner.query(
+        `CREATE INDEX IF NOT EXISTS "IDX_ae34e6b153a90672eb9dc4857d" ON "watchlist" ("requestedById")`
+      );
+      await queryRunner.query(
+        `CREATE INDEX IF NOT EXISTS "IDX_6641da8d831b93dfcb429f8b8b" ON "watchlist" ("mediaId")`
+      );
+      await queryRunner.query(
+        `CREATE INDEX IF NOT EXISTS "IDX_e460d2f12505b0d9adf2a8014a" ON "blocklist" ("externalId")`
+      );
+      await queryRunner.query(
+        `CREATE INDEX IF NOT EXISTS "IDX_356721a49f145aa439c16e6b99" ON "blocklist" ("userId")`
+      );
+      return;
+    }
+
     await queryRunner.query(`DROP INDEX "IDX_03f7958328e311761b0de675fb"`);
     await queryRunner.query(
       `CREATE TABLE "temporary_user_push_subscription" ("id" integer PRIMARY KEY AUTOINCREMENT NOT NULL, "endpoint" varchar NOT NULL, "p256dh" varchar NOT NULL, "auth" varchar NOT NULL, "userId" integer, "userAgent" varchar, "createdAt" datetime DEFAULT (CURRENT_TIMESTAMP), CONSTRAINT "UQ_f90ab5a4ed54905a4bb51a7148b" UNIQUE ("auth"), CONSTRAINT "UQ_6427d07d9a171a3a1ab87480005" UNIQUE ("endpoint", "userId"), CONSTRAINT "FK_03f7958328e311761b0de675fbe" FOREIGN KEY ("userId") REFERENCES "user" ("id") ON DELETE CASCADE ON UPDATE NO ACTION)`

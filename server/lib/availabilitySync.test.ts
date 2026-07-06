@@ -1621,7 +1621,7 @@ describe('AvailabilitySync', () => {
           media: { id: media.id },
           requestedBy: { id: 1 },
           type: MediaType.MOVIE,
-          is4k: true,
+          isAlt: true,
         })
         .callListeners(false)
         .execute();

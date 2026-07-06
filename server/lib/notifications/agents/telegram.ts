@@ -148,7 +148,7 @@ class TelegramAgent
       ? payload.issue
         ? `${applicationUrl}/issues/${payload.issue.id}`
         : payload.media
-          ? `${applicationUrl}/${payload.media.mediaType}/${payload.media.tmdbId}`
+          ? `${applicationUrl}/${payload.media.mediaType}/${payload.media.hcId ?? payload.media.tmdbId}`
           : undefined
       : undefined;
 

@@ -1,10 +1,12 @@
 import { LRUCache } from 'lru-cache';
 
 export type AvailableCacheIds =
+  | 'hardcover'
   | 'tmdb'
   | 'tmdbscan'
   | 'radarr'
   | 'sonarr'
+  | 'readarr'
   | 'rt'
   | 'imdb'
   | 'github'
@@ -227,6 +229,7 @@ class CacheManager {
     }),
     radarr: new Cache('radarr', 'Radarr API', { max: RADARR_MAX_KEYS }),
     sonarr: new Cache('sonarr', 'Sonarr API', { max: SONARR_MAX_KEYS }),
+    readarr: new Cache('readarr', 'Readarr API', { max: RADARR_MAX_KEYS }),
     rt: new Cache('rt', 'Rotten Tomatoes API', {
       stdTtl: 43200,
       max: RT_MAX_KEYS,
@@ -249,6 +252,10 @@ class CacheManager {
     tvdb: new Cache('tvdb', 'The TVDB API', {
       stdTtl: 21600,
       max: TVDB_MAX_KEYS,
+    }),
+    hardcover: new Cache('hardcover', 'Hardcover API', {
+      stdTtl: 21600,
+      max: TMDB_MAX_KEYS,
     }),
   };
 

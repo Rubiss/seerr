@@ -26,8 +26,12 @@ import {
 } from '@server/constants/media';
 import { MediaServerType } from '@server/constants/server';
 import type { MediaWatchDataResponse } from '@server/interfaces/api/mediaInterfaces';
-import type { DownloadingItem } from '@server/lib/downloadtracker';
-import type { RadarrSettings, SonarrSettings } from '@server/lib/settings';
+import type {
+  RadarrSettings,
+  ReadarrSettings,
+  SonarrSettings,
+} from '@server/lib/settings';
+import type { BookDetails } from '@server/models/Book';
 import type { MovieDetails } from '@server/models/Movie';
 import type { TvDetails } from '@server/models/Tv';
 import axios from 'axios';
@@ -35,25 +39,13 @@ import Link from 'next/link';
 import { useIntl } from 'react-intl';
 import useSWR from 'swr';
 
-import type { JSX } from 'react';
-
-const filterDuplicateDownloads = (
-  items: DownloadingItem[] = []
-): DownloadingItem[] => {
-  const seen = new Set<string>();
-  return items.filter((item) => {
-    if (seen.has(item.downloadId)) return false;
-    seen.add(item.downloadId);
-    return true;
-  });
-};
-
 const messages = defineMessages('components.ManageSlideOver', {
   manageModalTitle: 'Manage {mediaType}',
   manageModalIssues: 'Open Issues',
   manageModalRequests: 'Requests',
   manageModalMedia: 'Media',
   manageModalMedia4k: '4K Media',
+  manageModalMediaAudiobook: 'Audiobook Media',
   manageModalAdvanced: 'Advanced',
   manageModalNoRequests: 'No requests.',
   manageModalClearMedia: 'Clear Data',
@@ -67,9 +59,12 @@ const messages = defineMessages('components.ManageSlideOver', {
   removearr4k: 'Remove from 4K {arr}',
   clearmediadataerror: 'Something went wrong while clearing the media data.',
   removemediaerror: 'Something went wrong while removing the media.',
+  openarraudiobook: 'Open in Audiobook {arr}',
+  removearraudiobook: 'Remove from Audiobook {arr}',
   downloadstatus: 'Downloads',
   markavailable: 'Mark as Available',
   mark4kavailable: 'Mark as Available in 4K',
+  markaudiobookavailable: 'Mark as Available (Audiobook)',
   markallseasonsavailable: 'Mark All Seasons as Available',
   markallseasons4kavailable: 'Mark All Seasons as Available in 4K',
   opentautulli: 'Open in Tautulli',
@@ -80,10 +75,19 @@ const messages = defineMessages('components.ManageSlideOver', {
   playedby: 'Played By',
   movie: 'movie',
   tvshow: 'series',
+  book: 'book',
 });
 
-const isMovie = (movie: MovieDetails | TvDetails): movie is MovieDetails => {
+const isMovie = (
+  movie: MovieDetails | TvDetails | BookDetails
+): movie is MovieDetails => {
   return (movie as MovieDetails).title !== undefined;
+};
+
+const isBook = (
+  book: MovieDetails | TvDetails | BookDetails
+): book is BookDetails => {
+  return (book as BookDetails).author !== undefined;
 };
 
 interface ManageSlideOverProps {
@@ -103,13 +107,21 @@ interface ManageSlideOverTvProps extends ManageSlideOverProps {
   data: TvDetails;
 }
 
+interface ManageSlideOverBookProps extends ManageSlideOverProps {
+  mediaType: 'book';
+  data: BookDetails;
+}
+
 const ManageSlideOver = ({
   show,
   mediaType,
   onClose,
   data,
   revalidate,
-}: ManageSlideOverMovieProps | ManageSlideOverTvProps) => {
+}:
+  | ManageSlideOverMovieProps
+  | ManageSlideOverTvProps
+  | ManageSlideOverBookProps) => {
   const { user: currentUser, hasPermission } = useUser();
   const intl = useIntl();
   const { addToast } = useToasts();
@@ -127,6 +139,9 @@ const ManageSlideOver = ({
   const { data: sonarrData } = useSWR<SonarrSettings[]>(
     hasPermission(Permission.ADMIN) ? '/api/v1/settings/sonarr' : null
   );
+  const { data: readarrData } = useSWR<ReadarrSettings[]>(
+    hasPermission(Permission.ADMIN) ? '/api/v1/settings/readarr' : null
+  );
 
   const deleteMedia = async () => {
     if (data.mediaInfo) {
@@ -143,11 +158,11 @@ const ManageSlideOver = ({
     }
   };
 
-  const deleteMediaFile = async (is4k = false) => {
+  const deleteMediaFile = async (isAlt = false) => {
     if (data.mediaInfo) {
       try {
         await axios.delete(
-          `/api/v1/media/${data.mediaInfo.id}/file?is4k=${is4k}`
+          `/api/v1/media/${data.mediaInfo.id}/file?isAlt=${isAlt}`
         );
       } catch (e) {
         if (!axios.isAxiosError(e) || e.response?.status !== 404) {
@@ -173,36 +188,18 @@ const ManageSlideOver = ({
               radarr.isDefault && radarr.id === data.mediaInfo?.serviceId
           ) !== undefined
         );
+      } else if (data.mediaInfo.mediaType === MediaType.BOOK) {
+        return (
+          readarrData?.find(
+            (readarr) =>
+              readarr.isDefault && readarr.id === data.mediaInfo?.serviceId
+          ) !== undefined
+        );
       } else {
         return (
           sonarrData?.find(
             (sonarr) =>
               sonarr.isDefault && sonarr.id === data.mediaInfo?.serviceId
-          ) !== undefined
-        );
-      }
-    }
-    return false;
-  };
-
-  const isDefault4kService = () => {
-    if (data.mediaInfo) {
-      if (data.mediaInfo.mediaType === MediaType.MOVIE) {
-        return (
-          radarrData?.find(
-            (radarr) =>
-              radarr.isDefault &&
-              radarr.is4k &&
-              radarr.id === data.mediaInfo?.serviceId4k
-          ) !== undefined
-        );
-      } else {
-        return (
-          sonarrData?.find(
-            (sonarr) =>
-              sonarr.isDefault &&
-              sonarr.is4k &&
-              sonarr.id === data.mediaInfo?.serviceId4k
           ) !== undefined
         );
       }
@@ -232,7 +229,7 @@ const ManageSlideOver = ({
       (issue) => issue.status === IssueStatus.OPEN
     ) ?? [];
 
-  const styledPlayCount = (playCount: number): JSX.Element => {
+  const styledPlayCount = (playCount: number) => {
     return (
       <>
         {intl.formatMessage(messages.plays, {
@@ -250,45 +247,45 @@ const ManageSlideOver = ({
       show={show}
       title={intl.formatMessage(messages.manageModalTitle, {
         mediaType: intl.formatMessage(
-          mediaType === 'movie' ? globalMessages.movie : globalMessages.tvshow
+          mediaType === 'movie'
+            ? globalMessages.movie
+            : mediaType === 'tv'
+              ? globalMessages.tvshow
+              : messages.book
         ),
       })}
       onClose={() => onClose()}
-      subText={isMovie(data) ? data.title : data.name}
+      subText={isBook(data) || isMovie(data) ? data.title : data.name}
     >
       <div className="space-y-6">
         {((data?.mediaInfo?.downloadStatus ?? []).length > 0 ||
-          (data?.mediaInfo?.downloadStatus4k ?? []).length > 0) && (
+          (data?.mediaInfo?.downloadStatusAlt ?? []).length > 0) && (
           <div>
             <h3 className="mb-2 text-xl font-bold">
               {intl.formatMessage(messages.downloadstatus)}
             </h3>
             <div className="overflow-hidden rounded-md border border-gray-700 shadow">
               <ul>
-                {filterDuplicateDownloads(data.mediaInfo?.downloadStatus).map(
-                  (status, index) => (
-                    <Tooltip
-                      key={`dl-status-${status.externalId}-${index}`}
-                      content={status.title}
-                    >
-                      <li className="border-b border-gray-700 last:border-b-0">
-                        <DownloadBlock downloadItem={status} />
-                      </li>
-                    </Tooltip>
-                  )
-                )}
-                {filterDuplicateDownloads(data.mediaInfo?.downloadStatus4k).map(
-                  (status, index) => (
-                    <Tooltip
-                      key={`dl-status-4k-${status.externalId}-${index}`}
-                      content={status.title}
-                    >
-                      <li className="border-b border-gray-700 last:border-b-0">
-                        <DownloadBlock downloadItem={status} is4k />
-                      </li>
-                    </Tooltip>
-                  )
-                )}
+                {data.mediaInfo?.downloadStatus?.map((status, index) => (
+                  <Tooltip
+                    key={`dl-status-${status.externalId}-${index}`}
+                    content={status.title}
+                  >
+                    <li className="border-b border-gray-700 last:border-b-0">
+                      <DownloadBlock downloadItem={status} />
+                    </li>
+                  </Tooltip>
+                ))}
+                {data.mediaInfo?.downloadStatusAlt?.map((status, index) => (
+                  <Tooltip
+                    key={`dl-status-${status.externalId}-${index}`}
+                    content={status.title}
+                  >
+                    <li className="border-b border-gray-700 last:border-b-0">
+                      <DownloadBlock downloadItem={status} isAlt />
+                    </li>
+                  </Tooltip>
+                ))}
               </ul>
             </div>
           </div>
@@ -344,8 +341,12 @@ const ManageSlideOver = ({
             </h3>
             <div className="overflow-hidden rounded-md border border-gray-700 shadow">
               <BlocklistBlock
-                tmdbId={data.mediaInfo.tmdbId}
-                mediaType={data.mediaInfo.mediaType}
+                mediaId={
+                  mediaType === 'book'
+                    ? (data.mediaInfo.hcId ?? 0)
+                    : (data.mediaInfo.tmdbId ?? 0)
+                }
+                mediaType={mediaType}
                 onUpdate={() => revalidate()}
                 onDelete={() => onClose()}
               />
@@ -469,7 +470,12 @@ const ManageSlideOver = ({
                       <ServerIcon />
                       <span>
                         {intl.formatMessage(messages.openarr, {
-                          arr: mediaType === 'movie' ? 'Radarr' : 'Sonarr',
+                          arr:
+                            mediaType === 'movie'
+                              ? 'Radarr'
+                              : mediaType === 'tv'
+                                ? 'Sonarr'
+                                : 'Readarr',
                         })}
                       </span>
                     </Button>
@@ -490,7 +496,12 @@ const ManageSlideOver = ({
                         <TrashIcon />
                         <span>
                           {intl.formatMessage(messages.removearr, {
-                            arr: mediaType === 'movie' ? 'Radarr' : 'Sonarr',
+                            arr:
+                              mediaType === 'movie'
+                                ? 'Radarr'
+                                : mediaType === 'tv'
+                                  ? 'Sonarr'
+                                  : 'Readarr',
                           })}
                         </span>
                       </ConfirmButton>
@@ -501,9 +512,16 @@ const ManageSlideOver = ({
                             mediaType: intl.formatMessage(
                               mediaType === 'movie'
                                 ? messages.movie
-                                : messages.tvshow
+                                : mediaType === 'tv'
+                                  ? messages.tvshow
+                                  : messages.book
                             ),
-                            arr: mediaType === 'movie' ? 'Radarr' : 'Sonarr',
+                            arr:
+                              mediaType === 'movie'
+                                ? 'Radarr'
+                                : mediaType === 'tv'
+                                  ? 'Sonarr'
+                                  : 'Readarr',
                           }
                         )}
                       </div>
@@ -513,20 +531,24 @@ const ManageSlideOver = ({
             </div>
           )}
         {hasPermission(Permission.ADMIN) &&
-          (data.mediaInfo?.serviceUrl4k ||
-            data.mediaInfo?.tautulliUrl4k ||
+          (data.mediaInfo?.serviceUrlAlt ||
+            data.mediaInfo?.tautulliUrlAlt ||
             watchData?.data4k) && (
             <div>
               <h3 className="mb-2 text-xl font-bold">
-                {intl.formatMessage(messages.manageModalMedia4k)}
+                {intl.formatMessage(
+                  mediaType === 'book'
+                    ? messages.manageModalMediaAudiobook
+                    : messages.manageModalMedia4k
+                )}
               </h3>
               <div className="space-y-2">
-                {(watchData?.data4k || data.mediaInfo?.tautulliUrl4k) && (
+                {(watchData?.data4k || data.mediaInfo?.tautulliUrlAlt) && (
                   <div>
                     {watchData?.data4k && (
                       <div
                         className={`grid grid-cols-1 divide-y divide-gray-700 overflow-hidden border-gray-700 text-sm text-gray-300 shadow ${
-                          data.mediaInfo?.tautulliUrl4k
+                          data.mediaInfo?.tautulliUrlAlt
                             ? 'rounded-t-md border-x border-t'
                             : 'rounded-md border'
                         }`}
@@ -599,9 +621,9 @@ const ManageSlideOver = ({
                         )}
                       </div>
                     )}
-                    {data.mediaInfo?.tautulliUrl4k && (
+                    {data.mediaInfo?.tautulliUrlAlt && (
                       <a
-                        href={data.mediaInfo.tautulliUrl4k}
+                        href={data.mediaInfo.tautulliUrlAlt}
                         target="_blank"
                         rel="noreferrer"
                       >
@@ -620,10 +642,10 @@ const ManageSlideOver = ({
                     )}
                   </div>
                 )}
-                {data?.mediaInfo?.serviceUrl4k && (
+                {data?.mediaInfo?.serviceUrlAlt && (
                   <>
                     <a
-                      href={data?.mediaInfo?.serviceUrl4k}
+                      href={data?.mediaInfo?.serviceUrlAlt}
                       target="_blank"
                       rel="noreferrer"
                       className="block"
@@ -631,13 +653,23 @@ const ManageSlideOver = ({
                       <Button buttonType="ghost" className="w-full">
                         <ServerIcon />
                         <span>
-                          {intl.formatMessage(messages.openarr4k, {
-                            arr: mediaType === 'movie' ? 'Radarr' : 'Sonarr',
-                          })}
+                          {intl.formatMessage(
+                            mediaType === 'book'
+                              ? messages.openarraudiobook
+                              : messages.openarr4k,
+                            {
+                              arr:
+                                mediaType === 'movie'
+                                  ? 'Radarr'
+                                  : mediaType === 'tv'
+                                    ? 'Sonarr'
+                                    : 'Readarr',
+                            }
+                          )}
                         </span>
                       </Button>
                     </a>
-                    {isDefault4kService() && (
+                    {isDefaultService() && (
                       <div>
                         <ConfirmButton
                           onClick={() => deleteMediaFile(true)}
@@ -648,9 +680,19 @@ const ManageSlideOver = ({
                         >
                           <TrashIcon />
                           <span>
-                            {intl.formatMessage(messages.removearr4k, {
-                              arr: mediaType === 'movie' ? 'Radarr' : 'Sonarr',
-                            })}
+                            {intl.formatMessage(
+                              mediaType === 'book'
+                                ? messages.removearraudiobook
+                                : messages.removearr4k,
+                              {
+                                arr:
+                                  mediaType === 'movie'
+                                    ? 'Radarr'
+                                    : mediaType === 'tv'
+                                      ? 'Sonarr'
+                                      : 'Readarr',
+                              }
+                            )}
                           </span>
                         </ConfirmButton>
                         <div className="mt-1 text-xs text-gray-400">
@@ -660,9 +702,16 @@ const ManageSlideOver = ({
                               mediaType: intl.formatMessage(
                                 mediaType === 'movie'
                                   ? messages.movie
-                                  : messages.tvshow
+                                  : mediaType === 'tv'
+                                    ? messages.tvshow
+                                    : messages.book
                               ),
-                              arr: mediaType === 'movie' ? 'Radarr' : 'Sonarr',
+                              arr:
+                                mediaType === 'movie'
+                                  ? 'Radarr'
+                                  : mediaType === 'tv'
+                                    ? 'Sonarr'
+                                    : 'Readarr',
                             }
                           )}
                         </div>
@@ -690,15 +739,20 @@ const ManageSlideOver = ({
                     <CheckCircleIcon />
                     <span>
                       {intl.formatMessage(
-                        mediaType === 'movie'
-                          ? messages.markavailable
-                          : messages.markallseasonsavailable
+                        mediaType === 'tv'
+                          ? messages.markallseasonsavailable
+                          : messages.markavailable
                       )}
                     </span>
                   </Button>
                 )}
-                {data?.mediaInfo.status4k !== MediaStatus.AVAILABLE &&
-                  settings.currentSettings.series4kEnabled && (
+                {data?.mediaInfo.statusAlt !== MediaStatus.AVAILABLE &&
+                  ((mediaType === 'tv' &&
+                    settings.currentSettings.series4kEnabled) ||
+                    (mediaType === 'movie' &&
+                      settings.currentSettings.movie4kEnabled) ||
+                    (mediaType === 'book' &&
+                      settings.currentSettings.bookAudioEnabled)) && (
                     <Button
                       onClick={() => markAvailable(true)}
                       className="w-full"
@@ -707,9 +761,11 @@ const ManageSlideOver = ({
                       <CheckCircleIcon />
                       <span>
                         {intl.formatMessage(
-                          mediaType === 'movie'
-                            ? messages.mark4kavailable
-                            : messages.markallseasons4kavailable
+                          mediaType === 'tv'
+                            ? messages.markallseasons4kavailable
+                            : mediaType === 'book'
+                              ? messages.markaudiobookavailable
+                              : messages.mark4kavailable
                         )}
                       </span>
                     </Button>
@@ -728,7 +784,11 @@ const ManageSlideOver = ({
                   <div className="mt-2 text-xs text-gray-400">
                     {intl.formatMessage(messages.manageModalClearMediaWarning, {
                       mediaType: intl.formatMessage(
-                        mediaType === 'movie' ? messages.movie : messages.tvshow
+                        mediaType === 'movie'
+                          ? messages.movie
+                          : mediaType === 'tv'
+                            ? messages.tvshow
+                            : messages.book
                       ),
                       mediaServerName:
                         settings.currentSettings.mediaServerType ===

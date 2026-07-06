@@ -6,7 +6,7 @@ import {
 } from '@server/constants/media';
 import { getRepository } from '@server/datasource';
 import Media from '@server/entity/Media';
-import MediaRequest from '@server/entity/MediaRequest';
+import { MediaRequest } from '@server/entity/MediaRequest';
 import Season from '@server/entity/Season';
 import { getSettings } from '@server/lib/settings';
 import logger from '@server/logger';
@@ -37,6 +37,7 @@ export interface MediaIds {
 
 interface ProcessOptions {
   is4k?: boolean;
+  isAlt?: boolean;
   mediaAddedAt?: Date;
   ratingKey?: string;
   jellyfinMediaId?: string;
@@ -91,7 +92,10 @@ class BaseScanner<T> {
     const mediaRepository = getRepository(Media);
 
     const existing = await mediaRepository.findOne({
-      where: { tmdbId: tmdbId, mediaType },
+      where: {
+        [mediaType === MediaType.BOOK ? 'hcId' : 'tmdbId']: tmdbId,
+        mediaType,
+      },
     });
 
     return existing;
@@ -256,6 +260,130 @@ class BaseScanner<T> {
             is4k && this.enable4kMovie ? jellyfinMediaId : undefined;
         }
 
+        await mediaRepository.save(newMedia);
+        this.log(`Saved new media: ${title}`);
+      }
+    });
+  }
+
+  /** Update the ebook or audiobook independently, serializing imports per title. */
+  protected async processBook(
+    hcId: number,
+    {
+      isAlt = false,
+      mediaAddedAt,
+      ratingKey,
+      serviceId,
+      externalServiceId,
+      externalServiceSlug,
+      processing = false,
+      title = 'Unknown Title',
+    }: ProcessOptions = {}
+  ): Promise<void> {
+    const mediaRepository = getRepository(Media);
+
+    await this.asyncLock.dispatch(hcId, async () => {
+      const existing = await this.getExisting(hcId, MediaType.BOOK);
+
+      if (existing) {
+        let changedExisting = false;
+
+        if (
+          existing[isAlt ? 'statusAlt' : 'status'] !== MediaStatus.AVAILABLE
+        ) {
+          existing[isAlt ? 'statusAlt' : 'status'] = processing
+            ? MediaStatus.PROCESSING
+            : MediaStatus.AVAILABLE;
+          if (mediaAddedAt) {
+            existing.mediaAddedAt = mediaAddedAt;
+          }
+          changedExisting = true;
+        }
+
+        if (!changedExisting && !existing.mediaAddedAt && mediaAddedAt) {
+          existing.mediaAddedAt = mediaAddedAt;
+          changedExisting = true;
+        }
+
+        if (
+          ratingKey &&
+          existing[isAlt ? 'ratingKeyAlt' : 'ratingKey'] !== ratingKey
+        ) {
+          existing[isAlt ? 'ratingKeyAlt' : 'ratingKey'] = ratingKey;
+          changedExisting = true;
+        }
+
+        if (
+          serviceId !== undefined &&
+          existing[isAlt ? 'serviceIdAlt' : 'serviceId'] !== serviceId
+        ) {
+          existing[isAlt ? 'serviceIdAlt' : 'serviceId'] = serviceId;
+          changedExisting = true;
+        }
+
+        if (
+          externalServiceId !== undefined &&
+          existing[isAlt ? 'externalServiceIdAlt' : 'externalServiceId'] !==
+            externalServiceId
+        ) {
+          existing[isAlt ? 'externalServiceIdAlt' : 'externalServiceId'] =
+            externalServiceId;
+          changedExisting = true;
+        }
+
+        if (
+          externalServiceSlug !== undefined &&
+          existing[isAlt ? 'externalServiceSlugAlt' : 'externalServiceSlug'] !==
+            externalServiceSlug
+        ) {
+          existing[isAlt ? 'externalServiceSlugAlt' : 'externalServiceSlug'] =
+            externalServiceSlug;
+          changedExisting = true;
+        }
+
+        if (changedExisting) {
+          await mediaRepository.save(existing);
+          this.log(
+            `Media for ${title} exists. Changes were detected and the title will be updated.`,
+            'info'
+          );
+        } else {
+          this.log(`Title already exists and no changes detected for ${title}`);
+        }
+      } else {
+        const newMedia = new Media();
+        newMedia.hcId = hcId;
+
+        newMedia.status =
+          !isAlt && !processing
+            ? MediaStatus.AVAILABLE
+            : !isAlt && processing
+              ? MediaStatus.PROCESSING
+              : MediaStatus.UNKNOWN;
+        newMedia.statusAlt =
+          isAlt && !processing
+            ? MediaStatus.AVAILABLE
+            : isAlt && processing
+              ? MediaStatus.PROCESSING
+              : MediaStatus.UNKNOWN;
+        newMedia.mediaType = MediaType.BOOK;
+        newMedia.serviceId = !isAlt ? serviceId : undefined;
+        newMedia.serviceIdAlt = isAlt ? serviceId : undefined;
+        newMedia.externalServiceId = !isAlt ? externalServiceId : undefined;
+        newMedia.externalServiceIdAlt = isAlt ? externalServiceId : undefined;
+        newMedia.externalServiceSlug = !isAlt ? externalServiceSlug : undefined;
+        newMedia.externalServiceSlugAlt = isAlt
+          ? externalServiceSlug
+          : undefined;
+
+        if (mediaAddedAt) {
+          newMedia.mediaAddedAt = mediaAddedAt;
+        }
+
+        if (ratingKey) {
+          newMedia.ratingKey = !isAlt ? ratingKey : undefined;
+          newMedia.ratingKeyAlt = isAlt ? ratingKey : undefined;
+        }
         await mediaRepository.save(newMedia);
         this.log(`Saved new media: ${title}`);
       }

@@ -178,7 +178,7 @@ describe('MediaRequest.request', () => {
     const requester = await seedRequester(5);
     const otherRequester = await createRequester(
       'second@seerr.dev',
-      Permission.REQUEST_4K
+      Permission.REQUEST_ALT
     );
 
     const results = await Promise.allSettled(

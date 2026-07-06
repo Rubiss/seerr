@@ -14,7 +14,7 @@ import { z } from 'zod';
 const blocklistRoutes = Router();
 
 export const blocklistAdd = z.object({
-  tmdbId: z.coerce.number(),
+  externalId: z.coerce.number(),
   mediaType: z.nativeEnum(MediaType),
   title: z.coerce.string().optional(),
   user: z.coerce.number(),
@@ -92,7 +92,11 @@ blocklistRoutes.get(
   }),
   async (req, res, next) => {
     const mediaType = req.query.mediaType;
-    if (mediaType !== MediaType.MOVIE && mediaType !== MediaType.TV) {
+    if (
+      mediaType !== MediaType.MOVIE &&
+      mediaType !== MediaType.TV &&
+      mediaType !== MediaType.BOOK
+    ) {
       return next({
         status: 400,
         message: 'Invalid or missing mediaType query parameter.',
@@ -104,7 +108,7 @@ blocklistRoutes.get(
 
       const blocklistItem = await blocklisteRepository.findOneOrFail({
         where: {
-          tmdbId: Number(req.params.id),
+          externalId: Number(req.params.id),
           mediaType,
         },
       });
@@ -147,7 +151,7 @@ blocklistRoutes.post(
             return next({ status: 412, message: 'Item already blocklisted' });
           default:
             logger.warn('Something wrong with data blocklist', {
-              tmdbId: req.body.tmdbId,
+              externalId: req.body.externalId,
               mediaType: req.body.mediaType,
               label: 'Blocklist',
             });
@@ -187,14 +191,14 @@ blocklistRoutes.post(
 
         const [existingBlocklists, existingMedia] = await Promise.all([
           blocklistRepository.find({
-            where: { tmdbId: In(partIds), mediaType: MediaType.MOVIE },
+            where: { externalId: In(partIds), mediaType: MediaType.MOVIE },
           }),
           mediaRepository.find({
             where: { tmdbId: In(partIds), mediaType: MediaType.MOVIE },
           }),
         ]);
         const blocklistByTmdbId = new Map(
-          existingBlocklists.map((b) => [b.tmdbId, b])
+          existingBlocklists.map((b) => [b.externalId, b])
         );
         const mediaByTmdbId = new Map(existingMedia.map((m) => [m.tmdbId, m]));
 
@@ -205,7 +209,7 @@ blocklistRoutes.post(
             }
 
             let blocklist = new Blocklist({
-              tmdbId: part.id,
+              externalId: part.id,
               mediaType: MediaType.MOVIE,
               title: part.title,
               user: req.user,
@@ -221,7 +225,7 @@ blocklistRoutes.post(
                 throw error;
               }
               const row = await blocklistRepository.findOne({
-                where: { tmdbId: part.id, mediaType: MediaType.MOVIE },
+                where: { externalId: part.id, mediaType: MediaType.MOVIE },
               });
               if (!row) {
                 throw error;
@@ -268,7 +272,11 @@ blocklistRoutes.delete(
   }),
   async (req, res, next) => {
     const mediaType = req.query.mediaType;
-    if (mediaType !== MediaType.MOVIE && mediaType !== MediaType.TV) {
+    if (
+      mediaType !== MediaType.MOVIE &&
+      mediaType !== MediaType.TV &&
+      mediaType !== MediaType.BOOK
+    ) {
       return next({
         status: 400,
         message: 'Invalid or missing mediaType query parameter.',
@@ -280,7 +288,7 @@ blocklistRoutes.delete(
 
       const blocklistItem = await blocklisteRepository.findOneOrFail({
         where: {
-          tmdbId: Number(req.params.id),
+          externalId: Number(req.params.id),
           mediaType,
         },
       });
@@ -291,8 +299,10 @@ blocklistRoutes.delete(
 
       const mediaItem = await mediaRepository.findOneOrFail({
         where: {
-          tmdbId: Number(req.params.id),
-          mediaType: req.query.mediaType as MediaType,
+          [mediaType === MediaType.BOOK ? 'hcId' : 'tmdbId']: Number(
+            req.params.id
+          ),
+          mediaType,
         },
       });
 
@@ -331,7 +341,7 @@ blocklistRoutes.delete(
         await Promise.all(
           collection.parts.map(async (part) => {
             const blocklistItem = await blocklistRepository.findOne({
-              where: { tmdbId: part.id, mediaType: MediaType.MOVIE },
+              where: { externalId: part.id, mediaType: MediaType.MOVIE },
             });
 
             if (blocklistItem) {

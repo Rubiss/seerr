@@ -137,6 +137,7 @@ const SonarrModal = ({ onClose, sonarr, onSave }: SonarrModalProps) => {
           intl.formatMessage(messages.validationLanguageProfileRequired)
         )
       : Yup.number(),
+    monitorNewItems: Yup.string().oneOf(['all', 'none']),
     externalUrl: Yup.string()
       .test(
         'valid-url',

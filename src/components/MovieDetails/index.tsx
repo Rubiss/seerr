@@ -140,7 +140,7 @@ const MovieDetails = ({ movie }: MovieDetailsProps) => {
     refreshInterval: refreshIntervalHelper(
       {
         downloadStatus: movie?.mediaInfo?.downloadStatus,
-        downloadStatus4k: movie?.mediaInfo?.downloadStatus4k,
+        downloadStatusAlt: movie?.mediaInfo?.downloadStatusAlt,
       },
       15000
     ),
@@ -170,11 +170,11 @@ const MovieDetails = ({ movie }: MovieDetailsProps) => {
     []
   );
 
-  const { mediaUrl: plexUrl, mediaUrl4k: plexUrl4k } = useDeepLinks({
+  const { mediaUrl: plexUrl, mediaUrlAlt: plexUrl4k } = useDeepLinks({
     mediaUrl: data?.mediaInfo?.mediaUrl,
-    mediaUrl4k: data?.mediaInfo?.mediaUrl4k,
+    mediaUrlAlt: data?.mediaInfo?.mediaUrlAlt,
     iOSPlexUrl: data?.mediaInfo?.iOSPlexUrl,
-    iOSPlexUrl4k: data?.mediaInfo?.iOSPlexUrl4k,
+    iOSPlexUrlAlt: data?.mediaInfo?.iOSPlexUrlAlt,
   });
 
   if (!data && !error) {
@@ -204,7 +204,7 @@ const MovieDetails = ({ movie }: MovieDetailsProps) => {
   if (
     settings.currentSettings.movie4kEnabled &&
     plexUrl4k &&
-    hasPermission([Permission.REQUEST_4K, Permission.REQUEST_4K_MOVIE], {
+    hasPermission([Permission.REQUEST_ALT, Permission.REQUEST_4K_MOVIE], {
       type: 'or',
     })
   ) {
@@ -332,7 +332,7 @@ const MovieDetails = ({ movie }: MovieDetailsProps) => {
 
     try {
       const response = await axios.post('/api/v1/watchlist', {
-        tmdbId: movie?.id,
+        externalId: movie?.id,
         mediaType: MediaType.MOVIE,
         title: movie?.title,
       });
@@ -391,7 +391,7 @@ const MovieDetails = ({ movie }: MovieDetailsProps) => {
 
     try {
       await axios.post('/api/v1/blocklist', {
-        tmdbId: movie?.id,
+        externalId: movie?.id,
         mediaType: 'movie',
         title: movie?.title,
         user: user?.id,
@@ -447,7 +447,7 @@ const MovieDetails = ({ movie }: MovieDetailsProps) => {
           <CachedImage
             type="tmdb"
             alt=""
-            src={`https://image.tmdb.org/t/p/w1920_and_h800_multi_faces/${data.backdropPath}`}
+            src={data.backdropPath}
             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
             fill
             priority
@@ -466,7 +466,7 @@ const MovieDetails = ({ movie }: MovieDetailsProps) => {
         onCancel={() => setShowIssueModal(false)}
         show={showIssueModal}
         mediaType="movie"
-        tmdbId={data.id}
+        mediaId={data.id}
       />
       <ManageSlideOver
         data={data}
@@ -482,7 +482,7 @@ const MovieDetails = ({ movie }: MovieDetailsProps) => {
         show={showManager}
       />
       <BlocklistModal
-        tmdbId={data.id}
+        externalId={data.id}
         type="movie"
         show={showBlocklistModal}
         onCancel={closeBlocklistModal}
@@ -495,7 +495,7 @@ const MovieDetails = ({ movie }: MovieDetailsProps) => {
             type="tmdb"
             src={
               data.posterPath
-                ? `https://image.tmdb.org/t/p/w600_and_h900_bestv2${data.posterPath}`
+                ? data.posterPath
                 : '/images/seerr_poster_not_found.png'
             }
             alt=""
@@ -513,7 +513,7 @@ const MovieDetails = ({ movie }: MovieDetailsProps) => {
               downloadItem={data.mediaInfo?.downloadStatus}
               title={data.title}
               inProgress={(data.mediaInfo?.downloadStatus ?? []).length > 0}
-              tmdbId={data.mediaInfo?.tmdbId}
+              mediaId={data.mediaInfo?.tmdbId}
               mediaType="movie"
               plexUrl={plexUrl}
               serviceUrl={data.mediaInfo?.serviceUrl}
@@ -522,7 +522,7 @@ const MovieDetails = ({ movie }: MovieDetailsProps) => {
               hasPermission(
                 [
                   Permission.MANAGE_REQUESTS,
-                  Permission.REQUEST_4K,
+                  Permission.REQUEST_ALT,
                   Permission.REQUEST_4K_MOVIE,
                 ],
                 {
@@ -530,17 +530,17 @@ const MovieDetails = ({ movie }: MovieDetailsProps) => {
                 }
               ) && (
                 <StatusBadge
-                  status={data.mediaInfo?.status4k}
-                  downloadItem={data.mediaInfo?.downloadStatus4k}
+                  status={data.mediaInfo?.statusAlt}
+                  downloadItem={data.mediaInfo?.downloadStatusAlt}
                   title={data.title}
-                  is4k
+                  isAlt
                   inProgress={
-                    (data.mediaInfo?.downloadStatus4k ?? []).length > 0
+                    (data.mediaInfo?.downloadStatusAlt ?? []).length > 0
                   }
-                  tmdbId={data.mediaInfo?.tmdbId}
+                  mediaId={data.mediaInfo?.tmdbId}
                   mediaType="movie"
                   plexUrl={plexUrl4k}
-                  serviceUrl={data.mediaInfo?.serviceUrl4k}
+                  serviceUrl={data.mediaInfo?.serviceUrlAlt}
                 />
               )}
           </div>
@@ -626,18 +626,18 @@ const MovieDetails = ({ movie }: MovieDetailsProps) => {
           <RequestButton
             mediaType="movie"
             media={data.mediaInfo}
-            tmdbId={data.id}
+            mediaId={data.id}
             onUpdate={() => revalidate()}
           />
           {(data.mediaInfo?.status === MediaStatus.AVAILABLE ||
             (settings.currentSettings.movie4kEnabled &&
               hasPermission(
-                [Permission.REQUEST_4K, Permission.REQUEST_4K_MOVIE],
+                [Permission.REQUEST_ALT, Permission.REQUEST_4K_MOVIE],
                 {
                   type: 'or',
                 }
               ) &&
-              data.mediaInfo?.status4k === MediaStatus.AVAILABLE)) &&
+              data.mediaInfo?.statusAlt === MediaStatus.AVAILABLE)) &&
             hasPermission(
               [Permission.CREATE_ISSUES, Permission.MANAGE_ISSUES],
               {
@@ -659,7 +659,7 @@ const MovieDetails = ({ movie }: MovieDetailsProps) => {
             (data.mediaInfo.jellyfinMediaId ||
               data.mediaInfo.jellyfinMediaId4k ||
               data.mediaInfo.status !== MediaStatus.UNKNOWN ||
-              data.mediaInfo.status4k !== MediaStatus.UNKNOWN) && (
+              data.mediaInfo.statusAlt !== MediaStatus.UNKNOWN) && (
               <Tooltip content={intl.formatMessage(messages.managemovie)}>
                 <Button
                   buttonType="ghost"
@@ -1099,7 +1099,7 @@ const MovieDetails = ({ movie }: MovieDetailsProps) => {
                 imdbId={data.externalIds.imdbId}
                 rtUrl={ratingData?.rt?.url}
                 mediaUrl={
-                  data.mediaInfo?.mediaUrl ?? data.mediaInfo?.mediaUrl4k
+                  data.mediaInfo?.mediaUrl ?? data.mediaInfo?.mediaUrlAlt
                 }
               />
             </div>

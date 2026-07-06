@@ -482,8 +482,8 @@ class AvailabilitySync {
     const whereOptions = [
       { status: MediaStatus.AVAILABLE },
       { status: MediaStatus.PARTIALLY_AVAILABLE },
-      { status4k: MediaStatus.AVAILABLE },
-      { status4k: MediaStatus.PARTIALLY_AVAILABLE },
+      { statusAlt: MediaStatus.AVAILABLE },
+      { statusAlt: MediaStatus.PARTIALLY_AVAILABLE },
       { seasons: { status: MediaStatus.AVAILABLE } },
       { seasons: { status: MediaStatus.PARTIALLY_AVAILABLE } },
       { seasons: { status4k: MediaStatus.AVAILABLE } },
@@ -523,7 +523,7 @@ class AvailabilitySync {
           id: media.id,
         })
         .andWhere(
-          '(request.is4k = :is4k AND request.status = :requestStatus)',
+          '(request.isAlt = :is4k AND request.status = :requestStatus)',
           {
             requestStatus: MediaRequestStatus.APPROVED,
             is4k: is4k,

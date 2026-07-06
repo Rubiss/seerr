@@ -1,3 +1,4 @@
+import type { HardcoverBookDetails } from '@server/api/hardcover/interfaces';
 import { ANIME_KEYWORD_ID } from '@server/api/themoviedb/constants';
 import type {
   TmdbKeyword,
@@ -9,10 +10,12 @@ import { getRepository } from '@server/datasource';
 import OverrideRule from '@server/entity/OverrideRule';
 import type { User } from '@server/entity/User';
 import { getSettings } from '@server/lib/settings';
+import { isBookDetails } from '@server/utils/typeHelpers';
 
 export type OverrideRulesResult = {
   rootFolder: string | null;
   profileId: number | null;
+  metadataProfileId: number | null;
   tags: number[] | null;
 };
 
@@ -26,7 +29,7 @@ async function overrideRules({
 }: {
   mediaType: MediaType;
   is4k: boolean;
-  tmdbMedia: TmdbMovieDetails | TmdbTvDetails;
+  tmdbMedia: TmdbMovieDetails | TmdbTvDetails | HardcoverBookDetails;
   requestUser: User;
   tags?: number[] | null;
   serviceId?: number;
@@ -35,9 +38,14 @@ async function overrideRules({
 
   let rootFolder: string | null = null;
   let profileId: number | null = null;
+  let metadataProfileId: number | null = null;
 
   const serviceIdField =
-    mediaType === MediaType.MOVIE ? 'radarrServiceId' : 'sonarrServiceId';
+    mediaType === MediaType.MOVIE
+      ? 'radarrServiceId'
+      : mediaType === MediaType.BOOK
+        ? 'readarrServiceId'
+        : 'sonarrServiceId';
   if (serviceId === undefined) {
     const defaultRadarrId = is4k
       ? settings.radarr.find((r) => r.is4k && r.isDefault)?.id
@@ -46,7 +54,11 @@ async function overrideRules({
       ? settings.sonarr.find((s) => s.is4k && s.isDefault)?.id
       : settings.sonarr.find((s) => !s.is4k && s.isDefault)?.id;
     serviceId =
-      mediaType === MediaType.MOVIE ? defaultRadarrId : defaultSonarrId;
+      mediaType === MediaType.MOVIE
+        ? defaultRadarrId
+        : mediaType === MediaType.BOOK
+          ? settings.readarr.find((r) => r.isAudio === is4k && r.isDefault)?.id
+          : defaultSonarrId;
   }
 
   const overrideRuleRepository = getRepository(OverrideRule);
@@ -58,6 +70,14 @@ async function overrideRules({
         });
 
   const appliedOverrideRules = rules.filter((rule) => {
+    if (isBookDetails(tmdbMedia)) {
+      return (
+        !rule.users ||
+        rule.users
+          .split(',')
+          .some((userId) => Number(userId) === requestUser.id)
+      );
+    }
     const hasAnimeKeyword =
       'results' in tmdbMedia.keywords &&
       tmdbMedia.keywords.results.some(
@@ -150,6 +170,7 @@ async function overrideRules({
     if (prioritizedRule.profileId) {
       profileId = prioritizedRule.profileId;
     }
+    metadataProfileId = prioritizedRule.metadataProfileId ?? null;
     if (prioritizedRule.tags) {
       tags = [
         ...new Set([
@@ -160,7 +181,7 @@ async function overrideRules({
     }
   }
 
-  return { rootFolder, profileId, tags };
+  return { rootFolder, profileId, metadataProfileId, tags };
 }
 
 export default overrideRules;

@@ -125,7 +125,11 @@ const useDiscover = <
   if (settings.currentSettings.hideAvailable && hideAvailable) {
     titles = titles.filter(
       (i) =>
-        !(i.mediaType === 'movie' || i.mediaType === 'tv') ||
+        !(
+          i.mediaType === 'movie' ||
+          i.mediaType === 'tv' ||
+          i.mediaType === 'book'
+        ) ||
         (i.mediaInfo?.status !== MediaStatus.AVAILABLE &&
           i.mediaInfo?.status !== MediaStatus.PARTIALLY_AVAILABLE)
     );
@@ -138,8 +142,11 @@ const useDiscover = <
   ) {
     titles = titles.filter(
       (i) =>
-        !(i.mediaType === 'movie' || i.mediaType === 'tv') ||
-        i.mediaInfo?.status !== MediaStatus.BLOCKLISTED
+        !(
+          i.mediaType === 'movie' ||
+          i.mediaType === 'tv' ||
+          i.mediaType === 'book'
+        ) || i.mediaInfo?.status !== MediaStatus.BLOCKLISTED
     );
   }
 

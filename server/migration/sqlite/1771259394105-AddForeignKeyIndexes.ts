@@ -4,6 +4,62 @@ export class AddForeignKeyIndexes1771259394105 implements MigrationInterface {
   name = 'AddForeignKeyIndexes1771259394105';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
+    const hasBookBlocklistSchema =
+      (await queryRunner.hasTable('blocklist')) &&
+      (await queryRunner.hasColumn('blocklist', 'externalId'));
+
+    if (hasBookBlocklistSchema) {
+      await queryRunner.query(
+        `CREATE INDEX IF NOT EXISTS "IDX_ae34e6b153a90672eb9dc4857d" ON "watchlist" ("requestedById") `
+      );
+      await queryRunner.query(
+        `CREATE INDEX IF NOT EXISTS "IDX_6641da8d831b93dfcb429f8b8b" ON "watchlist" ("mediaId") `
+      );
+      await queryRunner.query(
+        `CREATE INDEX IF NOT EXISTS "IDX_707b033c2d0653f75213614789" ON "issue_comment" ("userId") `
+      );
+      await queryRunner.query(
+        `CREATE INDEX IF NOT EXISTS "IDX_180710fead1c94ca499c57a7d4" ON "issue_comment" ("issueId") `
+      );
+      await queryRunner.query(
+        `CREATE INDEX IF NOT EXISTS "IDX_53d04c07c3f4f54eae372ed665" ON "issue" ("issueType") `
+      );
+      await queryRunner.query(
+        `CREATE INDEX IF NOT EXISTS "IDX_276e20d053f3cff1645803c95d" ON "issue" ("mediaId") `
+      );
+      await queryRunner.query(
+        `CREATE INDEX IF NOT EXISTS "IDX_10b17b49d1ee77e7184216001e" ON "issue" ("createdById") `
+      );
+      await queryRunner.query(
+        `CREATE INDEX IF NOT EXISTS "IDX_da88a1019c850d1a7b143ca02e" ON "issue" ("modifiedById") `
+      );
+      await queryRunner.query(
+        `CREATE INDEX IF NOT EXISTS "IDX_6f14737e346d6b27d8e50d2157" ON "season_request" ("requestId") `
+      );
+      await queryRunner.query(
+        `CREATE INDEX IF NOT EXISTS "IDX_a1aa713f41c99e9d10c48da75a" ON "media_request" ("mediaId") `
+      );
+      await queryRunner.query(
+        `CREATE INDEX IF NOT EXISTS "IDX_6997bee94720f1ecb7f3113709" ON "media_request" ("requestedById") `
+      );
+      await queryRunner.query(
+        `CREATE INDEX IF NOT EXISTS "IDX_f4fc4efa14c3ba2b29c4525fa1" ON "media_request" ("modifiedById") `
+      );
+      await queryRunner.query(
+        `CREATE INDEX IF NOT EXISTS "IDX_03f7958328e311761b0de675fb" ON "user_push_subscription" ("userId") `
+      );
+      await queryRunner.query(
+        `CREATE INDEX IF NOT EXISTS "IDX_e460d2f12505b0d9adf2a8014a" ON "blocklist" ("externalId") `
+      );
+      await queryRunner.query(
+        `CREATE INDEX IF NOT EXISTS "IDX_356721a49f145aa439c16e6b99" ON "blocklist" ("userId") `
+      );
+      await queryRunner.query(
+        `CREATE INDEX IF NOT EXISTS "IDX_087099b39600be695591da9a49" ON "season" ("mediaId") `
+      );
+      return;
+    }
+
     await queryRunner.query(`DROP INDEX "IDX_6bbafa28411e6046421991ea21"`);
     await queryRunner.query(
       `CREATE TABLE "temporary_blocklist" ("id" integer PRIMARY KEY AUTOINCREMENT NOT NULL, "mediaType" varchar NOT NULL, "title" varchar, "tmdbId" integer NOT NULL, "blocklistedTags" varchar, "createdAt" datetime NOT NULL DEFAULT (datetime('now')), "userId" integer, "mediaId" integer, CONSTRAINT "REL_62b7ade94540f9f8d8bede54b9" UNIQUE ("mediaId"), CONSTRAINT "UQ_6bbafa28411e6046421991ea21c" UNIQUE ("tmdbId"))`

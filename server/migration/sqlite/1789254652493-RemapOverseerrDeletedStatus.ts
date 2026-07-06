@@ -7,6 +7,13 @@ export class RemapOverseerrDeletedStatus1789257612345 implements MigrationInterf
   name = 'RemapOverseerrDeletedStatus1789257612345';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
+    // Existing book-fork databases have already renamed these columns.
+    const altStatus = (await queryRunner.hasColumn('media', 'statusAlt'))
+      ? 'statusAlt'
+      : 'status4k';
+    const blocklistId = (await queryRunner.hasColumn('blocklist', 'externalId'))
+      ? 'externalId'
+      : 'tmdbId';
     await queryRunner.query(
       `UPDATE "season" SET "status" = 7 WHERE "status" = 6`
     );
@@ -14,10 +21,10 @@ export class RemapOverseerrDeletedStatus1789257612345 implements MigrationInterf
       `UPDATE "season" SET "status4k" = 7 WHERE "status4k" = 6`
     );
     await queryRunner.query(
-      `UPDATE "media" SET "status" = 7 WHERE "status" = 6 AND NOT EXISTS (SELECT 1 FROM "blocklist" WHERE "blocklist"."tmdbId" = "media"."tmdbId" AND "blocklist"."mediaType" = "media"."mediaType")`
+      `UPDATE "media" SET "status" = 7 WHERE "status" = 6 AND "mediaType" IN ('movie', 'tv') AND NOT EXISTS (SELECT 1 FROM "blocklist" WHERE "blocklist"."${blocklistId}" = "media"."tmdbId" AND "blocklist"."mediaType" = "media"."mediaType")`
     );
     await queryRunner.query(
-      `UPDATE "media" SET "status4k" = 7 WHERE "status4k" = 6 AND NOT EXISTS (SELECT 1 FROM "blocklist" WHERE "blocklist"."tmdbId" = "media"."tmdbId" AND "blocklist"."mediaType" = "media"."mediaType")`
+      `UPDATE "media" SET "${altStatus}" = 7 WHERE "${altStatus}" = 6 AND "mediaType" IN ('movie', 'tv') AND NOT EXISTS (SELECT 1 FROM "blocklist" WHERE "blocklist"."${blocklistId}" = "media"."tmdbId" AND "blocklist"."mediaType" = "media"."mediaType")`
     );
   }
 
