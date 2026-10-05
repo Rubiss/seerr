@@ -116,7 +116,7 @@ discoverRoutes.get('/books', async (req, res, next) => {
     const media = await Media.getRelatedMedia(
       req.user,
       data.data.books.map((result) => result.id),
-      MediaType.BOOK
+      { mediaType: MediaType.BOOK, includeActiveRequest: true }
     );
 
     return res.status(200).json({

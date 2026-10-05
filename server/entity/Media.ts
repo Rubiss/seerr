@@ -38,10 +38,15 @@ class Media {
   public static async getRelatedMedia(
     user: User | undefined,
     itemsOrIds: { tmdbId: number; mediaType: string }[] | number | number[],
-    typeOrOptions?: MediaType | { includeActiveRequest?: boolean }
+    typeOrOptions?:
+      | MediaType
+      | { mediaType?: MediaType; includeActiveRequest?: boolean }
   ): Promise<Media[]> {
     const mediaRepository = getRepository(Media);
-    const type = typeof typeOrOptions === 'string' ? typeOrOptions : undefined;
+    const type =
+      typeof typeOrOptions === 'string'
+        ? typeOrOptions
+        : typeOrOptions?.mediaType;
     const includeActiveRequest =
       typeof typeOrOptions === 'object' && typeOrOptions.includeActiveRequest;
     const items = (Array.isArray(itemsOrIds) ? itemsOrIds : [itemsOrIds]).map(

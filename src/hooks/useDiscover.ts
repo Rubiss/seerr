@@ -152,7 +152,11 @@ const useDiscover = <
 
   if (settings.currentSettings.hideRequested && hideRequested) {
     titles = titles.filter((i) => {
-      if (i.mediaType !== 'movie' && i.mediaType !== 'tv') {
+      if (
+        i.mediaType !== 'movie' &&
+        i.mediaType !== 'tv' &&
+        i.mediaType !== 'book'
+      ) {
         return true;
       }
 
