@@ -106,10 +106,6 @@ const useDiscover = <
       typeof data[size - 1] === 'undefined' &&
       isValidating);
 
-  const fetchMore = () => {
-    setSize(size + 1);
-  };
-
   let titles = (data ?? []).reduce((a, v) => {
     const results: T[] = [];
 
@@ -170,6 +166,15 @@ const useDiscover = <
     size,
     titles.length
   );
+
+  const fetchMore = () => {
+    // Empty batches are paged by the effect below, even when scrolling is active.
+    if (needsMore || isValidating || isLoadingMore || isReachingEnd || error) {
+      return;
+    }
+
+    void setSize(size + 1).catch(() => undefined);
+  };
 
   useEffect(() => {
     if (needsMore && !isValidating && !error) {
