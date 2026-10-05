@@ -18,7 +18,7 @@ import logger from '@server/logger';
 import { isAuthenticated } from '@server/middleware/auth';
 import { Router } from 'express';
 import type { FindOneOptions } from 'typeorm';
-import { In } from 'typeorm';
+import { EntityNotFoundError, In } from 'typeorm';
 
 const mediaRoutes = Router();
 
@@ -239,22 +239,24 @@ mediaRoutes.delete(
         );
       }
 
+      const serviceId = media[isAlt ? 'serviceIdAlt' : 'serviceId'];
       if (
-        media.serviceId &&
-        media.serviceId >= 0 &&
-        serviceSettings?.id !== media.serviceId
+        serviceId !== undefined &&
+        serviceId !== null &&
+        serviceId >= 0 &&
+        serviceSettings?.id !== serviceId
       ) {
         if (isMovie) {
           serviceSettings = settings.radarr.find(
-            (radarr) => radarr.id === media.serviceId
+            (radarr) => radarr.id === serviceId
           );
         } else if (isBook) {
           serviceSettings = settings.readarr.find(
-            (readarr) => readarr.id === media.serviceId
+            (readarr) => readarr.id === serviceId
           );
         } else {
           serviceSettings = settings.sonarr.find(
-            (sonarr) => sonarr.id === media.serviceId
+            (sonarr) => sonarr.id === serviceId
           );
         }
       }
@@ -274,7 +276,10 @@ mediaRoutes.delete(
             mediaId: media.id,
           }
         );
-        return;
+        return next({
+          status: 409,
+          message: `No ${serviceType + serviceName} server configured to delete media files`,
+        });
       }
 
       let service;
@@ -319,15 +324,27 @@ mediaRoutes.delete(
           throw new Error('TVDB ID not found');
         }
         await (service as SonarrAPI).removeSeries(tvdbId);
+
+        for (const season of media.seasons) {
+          season[isAlt ? 'status4k' : 'status'] = MediaStatus.DELETED;
+        }
       }
+
+      media[isAlt ? 'statusAlt' : 'status'] = MediaStatus.DELETED;
+      media.resetServiceData(isAlt);
+      await mediaRepository.save(media);
 
       return res.status(204).send();
     } catch (e) {
-      logger.error('Something went wrong fetching media in delete request', {
+      if (e instanceof EntityNotFoundError) {
+        return next({ status: 404, message: 'Media not found' });
+      }
+      logger.error('Something went wrong deleting media file', {
         label: 'Media',
+        mediaId: req.params.id,
         message: e.message,
       });
-      next({ status: 404, message: 'Media not found' });
+      next({ status: 500, message: 'Failed to delete media file' });
     }
   }
 );

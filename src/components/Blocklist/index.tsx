@@ -312,7 +312,9 @@ const BlocklistedItem = ({ item, revalidateList }: BlocklistedItemProps) => {
     setIsUpdating(true);
 
     try {
-      await axios.delete(`/api/v1/blocklist/${mediaType}/${externalId}`);
+      await axios.delete(
+        `/api/v1/blocklist/${externalId}?mediaType=${mediaType}`
+      );
 
       addToast(
         <span>
@@ -371,7 +373,7 @@ const BlocklistedItem = ({ item, revalidateList }: BlocklistedItemProps) => {
               src={
                 title && title.posterPath
                   ? title.posterPath
-                  : '/images/jellyseerr_poster_not_found.png'
+                  : '/images/seerr_poster_not_found.png'
               }
               alt=""
               sizes="100vw"

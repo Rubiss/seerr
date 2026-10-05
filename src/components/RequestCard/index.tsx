@@ -10,7 +10,10 @@ import useToasts from '@app/hooks/useToasts';
 import { Permission, useUser } from '@app/hooks/useUser';
 import globalMessages from '@app/i18n/globalMessages';
 import defineMessages from '@app/utils/defineMessages';
-import { refreshIntervalHelper } from '@app/utils/refreshIntervalHelper';
+import {
+  getRequestDownloadStatus,
+  refreshIntervalHelper,
+} from '@app/utils/refreshIntervalHelper';
 import { withProperties } from '@app/utils/typeHelpers';
 import {
   ArrowPathIcon,
@@ -35,6 +38,7 @@ import useSWR, { mutate } from 'swr';
 const messages = defineMessages('components.RequestCard', {
   seasons: '{seasonCount, plural, one {Season} other {Seasons}}',
   failedretry: 'Something went wrong while retrying the request.',
+  failedmodify: 'Something went wrong while modifying the request.',
   mediaerror: '{mediaType} Not Found',
   tmdbid: 'TMDB ID',
   tvdbid: 'TheTVDB ID',
@@ -82,6 +86,15 @@ const RequestCardError = ({ requestData }: RequestCardErrorProps) => {
     iOSPlexUrl: requestData?.media?.iOSPlexUrl,
     iOSPlexUrlAlt: requestData?.media?.iOSPlexUrlAlt,
   });
+
+  const requestDownloadStatus = getRequestDownloadStatus(
+    requestData?.media?.[
+      requestData?.isAlt ? 'downloadStatusAlt' : 'downloadStatus'
+    ],
+    requestData?.type === 'tv'
+      ? (requestData?.seasons ?? []).map((season) => season.seasonNumber)
+      : []
+  );
 
   const deleteRequest = async () => {
     await axios.delete(`/api/v1/media/${requestData?.media.id}`);
@@ -157,23 +170,9 @@ const RequestCardError = ({ requestData }: RequestCardErrorProps) => {
                           requestData.isAlt ? 'statusAlt' : 'status'
                         ]
                       }
-                      downloadItem={
-                        requestData.media[
-                          requestData.isAlt
-                            ? 'downloadStatusAlt'
-                            : 'downloadStatus'
-                        ]
-                      }
+                      downloadItem={requestDownloadStatus}
                       title={intl.formatMessage(messages.unknowntitle)}
-                      inProgress={
-                        (
-                          requestData.media[
-                            requestData.isAlt
-                              ? 'downloadStatusAlt'
-                              : 'downloadStatus'
-                          ] ?? []
-                        ).length > 0
-                      }
+                      inProgress={requestDownloadStatus.length > 0}
                       isAlt={requestData.isAlt}
                       mediaType={requestData.type}
                       plexUrl={requestData.isAlt ? plexUrlAlt : plexUrl}
@@ -274,12 +273,23 @@ const RequestCard = ({ request, onTitleData }: RequestCardProps) => {
     iOSPlexUrlAlt: requestData?.media?.iOSPlexUrlAlt,
   });
 
-  const modifyRequest = async (type: 'approve' | 'decline') => {
-    const response = await axios.post(`/api/v1/request/${request.id}/${type}`);
+  const [updatingType, setUpdatingType] = useState<
+    'approve' | 'decline' | null
+  >(null);
 
-    if (response) {
+  const modifyRequest = async (type: 'approve' | 'decline') => {
+    setUpdatingType(type);
+    try {
+      await axios.post(`/api/v1/request/${request.id}/${type}`);
       revalidate();
       mutate('/api/v1/request/count');
+    } catch {
+      addToast(intl.formatMessage(messages.failedmodify), {
+        autoDismiss: true,
+        appearance: 'error',
+      });
+    } finally {
+      setUpdatingType(null);
     }
   };
 
@@ -329,6 +339,15 @@ const RequestCard = ({ request, onTitleData }: RequestCardProps) => {
   if (!title || !requestData) {
     return <RequestCardError requestData={requestData} />;
   }
+
+  const requestDownloadStatus = getRequestDownloadStatus(
+    requestData.media[
+      requestData.isAlt ? 'downloadStatusAlt' : 'downloadStatus'
+    ],
+    requestData.type === 'tv'
+      ? requestData.seasons.map((season) => season.seasonNumber)
+      : []
+  );
 
   return (
     <>
@@ -468,11 +487,7 @@ const RequestCard = ({ request, onTitleData }: RequestCardProps) => {
                 status={
                   requestData.media[requestData.isAlt ? 'statusAlt' : 'status']
                 }
-                downloadItem={
-                  requestData.media[
-                    requestData.isAlt ? 'downloadStatusAlt' : 'downloadStatus'
-                  ]
-                }
+                downloadItem={requestDownloadStatus}
                 title={
                   isMovie(title)
                     ? title.title
@@ -480,13 +495,7 @@ const RequestCard = ({ request, onTitleData }: RequestCardProps) => {
                       ? title.title
                       : title.name
                 }
-                inProgress={
-                  (
-                    requestData.media[
-                      requestData.isAlt ? 'downloadStatusAlt' : 'downloadStatus'
-                    ] ?? []
-                  ).length > 0
-                }
+                inProgress={requestDownloadStatus.length > 0}
                 isAlt={requestData.isAlt}
                 mediaId={mediaId}
                 mediaType={mediaType}
@@ -526,6 +535,7 @@ const RequestCard = ({ request, onTitleData }: RequestCardProps) => {
                       buttonSize="sm"
                       className="hidden sm:block"
                       onClick={() => modifyRequest('approve')}
+                      disabled={updatingType !== null}
                     >
                       <CheckIcon />
                       <span>{intl.formatMessage(globalMessages.approve)}</span>
@@ -538,6 +548,7 @@ const RequestCard = ({ request, onTitleData }: RequestCardProps) => {
                         buttonSize="sm"
                         className="sm:hidden"
                         onClick={() => modifyRequest('approve')}
+                        disabled={updatingType !== null}
                       >
                         <CheckIcon />
                       </Button>
@@ -549,6 +560,7 @@ const RequestCard = ({ request, onTitleData }: RequestCardProps) => {
                       buttonSize="sm"
                       className="hidden sm:block"
                       onClick={() => modifyRequest('decline')}
+                      disabled={updatingType !== null}
                     >
                       <XMarkIcon />
                       <span>{intl.formatMessage(globalMessages.decline)}</span>
@@ -561,6 +573,7 @@ const RequestCard = ({ request, onTitleData }: RequestCardProps) => {
                         buttonSize="sm"
                         className="sm:hidden"
                         onClick={() => modifyRequest('decline')}
+                        disabled={updatingType !== null}
                       >
                         <XMarkIcon />
                       </Button>
@@ -633,7 +646,7 @@ const RequestCard = ({ request, onTitleData }: RequestCardProps) => {
             src={
               title.posterPath
                 ? title.posterPath
-                : '/images/jellyseerr_poster_not_found.png'
+                : '/images/seerr_poster_not_found.png'
             }
             alt=""
             sizes="100vw"

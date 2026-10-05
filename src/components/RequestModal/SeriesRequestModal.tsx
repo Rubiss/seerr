@@ -454,7 +454,7 @@ const SeriesRequestModal = ({
                                 src={
                                   book.posterPath
                                     ? book.posterPath
-                                    : '/images/jellyseerr_poster_not_found.png'
+                                    : '/images/seerr_poster_not_found.png'
                                 }
                                 alt=""
                                 sizes="100vw"

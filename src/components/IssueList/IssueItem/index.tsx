@@ -164,7 +164,7 @@ const IssueItem = ({ issue }: IssueItemProps) => {
               src={
                 title.posterPath
                   ? title.posterPath
-                  : '/images/jellyseerr_poster_not_found.png'
+                  : '/images/seerr_poster_not_found.png'
               }
               alt=""
               sizes="100vw"

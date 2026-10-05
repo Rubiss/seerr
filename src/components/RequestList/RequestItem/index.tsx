@@ -10,7 +10,10 @@ import useToasts from '@app/hooks/useToasts';
 import { Permission, useUser } from '@app/hooks/useUser';
 import globalMessages from '@app/i18n/globalMessages';
 import defineMessages from '@app/utils/defineMessages';
-import { refreshIntervalHelper } from '@app/utils/refreshIntervalHelper';
+import {
+  getRequestDownloadStatus,
+  refreshIntervalHelper,
+} from '@app/utils/refreshIntervalHelper';
 import {
   ArrowPathIcon,
   CheckIcon,
@@ -35,6 +38,7 @@ import useSWR, { mutate } from 'swr';
 const messages = defineMessages('components.RequestList.RequestItem', {
   seasons: '{seasonCount, plural, one {Season} other {Seasons}}',
   failedretry: 'Something went wrong while retrying the request.',
+  failedmodify: 'Something went wrong while modifying the request.',
   requested: 'Requested',
   requesteddate: 'Requested',
   modified: 'Modified',
@@ -47,6 +51,7 @@ const messages = defineMessages('components.RequestList.RequestItem', {
   tvdbid: 'TheTVDB ID',
   unknowntitle: 'Unknown Title',
   removearr: 'Remove from {arr}',
+  removemediaerror: 'Something went wrong while removing the media.',
   profileName: 'Profile',
   metadataProfileName: 'Metadata Profile',
 });
@@ -87,6 +92,15 @@ const RequestItemError = ({
     iOSPlexUrl: requestData?.media?.iOSPlexUrl,
     iOSPlexUrlAlt: requestData?.media?.iOSPlexUrlAlt,
   });
+
+  const requestDownloadStatus = getRequestDownloadStatus(
+    requestData?.media?.[
+      requestData?.isAlt ? 'downloadStatusAlt' : 'downloadStatus'
+    ],
+    requestData?.type === 'tv'
+      ? (requestData?.seasons ?? []).map((season) => season.seasonNumber)
+      : []
+  );
 
   return (
     <div className="flex h-64 w-full flex-col justify-center rounded-xl bg-gray-800 py-4 text-gray-400 shadow-md ring-1 ring-red-500 xl:h-28 xl:flex-row">
@@ -147,23 +161,9 @@ const RequestItemError = ({
                         requestData.isAlt ? 'statusAlt' : 'status'
                       ]
                     }
-                    downloadItem={
-                      requestData.media[
-                        requestData.isAlt
-                          ? 'downloadStatusAlt'
-                          : 'downloadStatus'
-                      ]
-                    }
+                    downloadItem={requestDownloadStatus}
                     title={intl.formatMessage(messages.unknowntitle)}
-                    inProgress={
-                      (
-                        requestData.media[
-                          requestData.isAlt
-                            ? 'downloadStatusAlt'
-                            : 'downloadStatus'
-                        ] ?? []
-                      ).length > 0
-                    }
+                    inProgress={requestDownloadStatus.length > 0}
                     isAlt={requestData.isAlt}
                     mediaType={requestData.type}
                     plexUrl={requestData.isAlt ? plexUrlAlt : plexUrl}
@@ -339,12 +339,24 @@ const RequestItem = ({ request, revalidateList }: RequestItemProps) => {
 
   const [isRetrying, setRetrying] = useState(false);
 
-  const modifyRequest = async (type: 'approve' | 'decline') => {
-    const response = await axios.post(`/api/v1/request/${request.id}/${type}`);
+  const [updatingType, setUpdatingType] = useState<
+    'approve' | 'decline' | null
+  >(null);
 
-    if (response) {
+  const modifyRequest = async (type: 'approve' | 'decline') => {
+    setUpdatingType(type);
+    try {
+      await axios.post(`/api/v1/request/${request.id}/${type}`);
       revalidate();
+      revalidateList();
       mutate('/api/v1/request/count');
+    } catch {
+      addToast(intl.formatMessage(messages.failedmodify), {
+        autoDismiss: true,
+        appearance: 'error',
+      });
+    } finally {
+      setUpdatingType(null);
     }
   };
 
@@ -357,10 +369,20 @@ const RequestItem = ({ request, revalidateList }: RequestItemProps) => {
 
   const deleteMediaFile = async () => {
     if (request.media) {
-      await axios.delete(
-        `/api/v1/media/${request.media.id}/file?isAlt=${request.isAlt}`
-      );
-      await axios.delete(`/api/v1/media/${request.media.id}`);
+      try {
+        await axios.delete(
+          `/api/v1/media/${request.media.id}/file?isAlt=${request.isAlt}`
+        );
+      } catch (e) {
+        if (!axios.isAxiosError(e) || e.response?.status !== 404) {
+          addToast(intl.formatMessage(messages.removemediaerror), {
+            autoDismiss: true,
+            appearance: 'error',
+          });
+          revalidateList();
+          return;
+        }
+      }
       revalidateList();
     }
   };
@@ -405,6 +427,15 @@ const RequestItem = ({ request, revalidateList }: RequestItemProps) => {
       />
     );
   }
+
+  const requestDownloadStatus = getRequestDownloadStatus(
+    requestData.media[
+      requestData.isAlt ? 'downloadStatusAlt' : 'downloadStatus'
+    ],
+    requestData.type === 'tv'
+      ? requestData.seasons.map((season) => season.seasonNumber)
+      : []
+  );
 
   return (
     <>
@@ -456,7 +487,7 @@ const RequestItem = ({ request, revalidateList }: RequestItemProps) => {
                 src={
                   title.posterPath
                     ? title.posterPath
-                    : '/images/jellyseerr_poster_not_found.png'
+                    : '/images/seerr_poster_not_found.png'
                 }
                 alt=""
                 sizes="100vw"
@@ -548,23 +579,11 @@ const RequestItem = ({ request, revalidateList }: RequestItemProps) => {
                       requestData.isAlt ? 'statusAlt' : 'status'
                     ]
                   }
-                  downloadItem={
-                    requestData.media[
-                      requestData.isAlt ? 'downloadStatusAlt' : 'downloadStatus'
-                    ]
-                  }
+                  downloadItem={requestDownloadStatus}
                   title={
                     isMovie(title) || isBook(title) ? title.title : title.name
                   }
-                  inProgress={
-                    (
-                      requestData.media[
-                        requestData.isAlt
-                          ? 'downloadStatusAlt'
-                          : 'downloadStatus'
-                      ] ?? []
-                    ).length > 0
-                  }
+                  inProgress={requestDownloadStatus.length > 0}
                   isAlt={requestData.isAlt}
                   mediaId={requestData.media.tmdbId || requestData.media.hcId}
                   mediaType={requestData.type}
@@ -765,6 +784,7 @@ const RequestItem = ({ request, revalidateList }: RequestItemProps) => {
                     className="w-full"
                     buttonType="success"
                     onClick={() => modifyRequest('approve')}
+                    disabled={updatingType !== null}
                   >
                     <CheckIcon />
                     <span>{intl.formatMessage(globalMessages.approve)}</span>
@@ -775,6 +795,7 @@ const RequestItem = ({ request, revalidateList }: RequestItemProps) => {
                     className="w-full"
                     buttonType="danger"
                     onClick={() => modifyRequest('decline')}
+                    disabled={updatingType !== null}
                   >
                     <XMarkIcon />
                     <span>{intl.formatMessage(globalMessages.decline)}</span>

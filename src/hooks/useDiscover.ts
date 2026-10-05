@@ -1,4 +1,9 @@
+import useToasts from '@app/hooks/useToasts';
+import globalMessages from '@app/i18n/globalMessages';
+import { getDiscoverPagination } from '@app/utils/discoverPagination';
 import { MediaStatus } from '@server/constants/media';
+import { useEffect } from 'react';
+import { useIntl } from 'react-intl';
 import useSWRInfinite from 'swr/infinite';
 import useSettings from './useSettings';
 import { Permission, useUser } from './useUser';
@@ -15,6 +20,7 @@ interface BaseMedia {
   mediaType: string;
   mediaInfo?: {
     status: MediaStatus;
+    hasActiveRequest?: boolean;
   };
 }
 
@@ -54,10 +60,12 @@ const useDiscover = <
 >(
   endpoint: string,
   options?: O,
-  { hideAvailable = true, hideBlocklisted = true } = {}
+  { hideAvailable = true, hideBlocklisted = true, hideRequested = true } = {}
 ): DiscoverResult<T, S> => {
   const settings = useSettings();
   const { hasPermission } = useUser();
+  const { addToast } = useToasts();
+  const intl = useIntl();
   const { data, error, size, setSize, isValidating, mutate } = useSWRInfinite<
     BaseSearchResult<T> & S
   >(
@@ -83,6 +91,8 @@ const useDiscover = <
     {
       initialSize: 3,
       revalidateFirstPage: false,
+      dedupingInterval: 30000,
+      revalidateOnFocus: false,
     }
   );
 
@@ -95,10 +105,6 @@ const useDiscover = <
       !!data &&
       typeof data[size - 1] === 'undefined' &&
       isValidating);
-
-  const fetchMore = () => {
-    setSize(size + 1);
-  };
 
   let titles = (data ?? []).reduce((a, v) => {
     const results: T[] = [];
@@ -116,11 +122,13 @@ const useDiscover = <
   if (settings.currentSettings.hideAvailable && hideAvailable) {
     titles = titles.filter(
       (i) =>
-        (i.mediaType === 'movie' ||
+        !(
+          i.mediaType === 'movie' ||
           i.mediaType === 'tv' ||
-          i.mediaType === 'book') &&
-        i.mediaInfo?.status !== MediaStatus.AVAILABLE &&
-        i.mediaInfo?.status !== MediaStatus.PARTIALLY_AVAILABLE
+          i.mediaType === 'book'
+        ) ||
+        (i.mediaInfo?.status !== MediaStatus.AVAILABLE &&
+          i.mediaInfo?.status !== MediaStatus.PARTIALLY_AVAILABLE)
     );
   }
 
@@ -131,19 +139,59 @@ const useDiscover = <
   ) {
     titles = titles.filter(
       (i) =>
-        (i.mediaType === 'movie' ||
+        !(
+          i.mediaType === 'movie' ||
           i.mediaType === 'tv' ||
-          i.mediaType === 'book') &&
-        i.mediaInfo?.status !== MediaStatus.BLOCKLISTED
+          i.mediaType === 'book'
+        ) || i.mediaInfo?.status !== MediaStatus.BLOCKLISTED
     );
   }
 
-  const isEmpty = !isLoadingInitialData && titles?.length === 0;
-  const isReachingEnd =
-    isEmpty ||
-    (!!data && (data[data?.length - 1]?.results.length ?? 0) < 20) ||
-    (!!data && (data[data?.length - 1]?.totalResults ?? 0) <= size * 20) ||
-    (!!data && (data[data?.length - 1]?.totalResults ?? 0) < 41);
+  if (settings.currentSettings.hideRequested && hideRequested) {
+    titles = titles.filter((i) => {
+      if (
+        i.mediaType !== 'movie' &&
+        i.mediaType !== 'tv' &&
+        i.mediaType !== 'book'
+      ) {
+        return true;
+      }
+
+      return !i.mediaInfo?.hasActiveRequest;
+    });
+  }
+
+  const { isEmpty, isReachingEnd, needsMore } = getDiscoverPagination(
+    data,
+    size,
+    titles.length
+  );
+
+  const fetchMore = () => {
+    // Empty batches are paged by the effect below, even when scrolling is active.
+    if (needsMore || isValidating || isLoadingMore || isReachingEnd || error) {
+      return;
+    }
+
+    void setSize(size + 1).catch(() => undefined);
+  };
+
+  useEffect(() => {
+    if (needsMore && !isValidating && !error) {
+      // SWR exposes fetch failures through `error`; stop paging on failure.
+      void setSize(size + 1).catch(() => undefined);
+    }
+  }, [needsMore, isValidating, error, setSize, size]);
+
+  useEffect(() => {
+    if (error && titles.length) {
+      addToast(intl.formatMessage(globalMessages.error), {
+        appearance: 'error',
+        autoDismiss: true,
+      });
+      console.error('Error while fetching discover titles:', error);
+    }
+  }, [data, error, addToast, intl, titles.length]);
 
   return {
     isLoadingInitialData,
@@ -151,7 +199,7 @@ const useDiscover = <
     fetchMore,
     isEmpty,
     isReachingEnd,
-    error,
+    error: error && titles.length ? null : error,
     titles,
     firstResultData: data?.[0],
     mutate,

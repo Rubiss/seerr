@@ -1,7 +1,11 @@
 import RadarrAPI from '@server/api/servarr/radarr';
 import ReadarrAPI from '@server/api/servarr/readarr';
 import SonarrAPI from '@server/api/servarr/sonarr';
-import { MediaStatus, MediaType } from '@server/constants/media';
+import {
+  MediaRequestStatus,
+  MediaStatus,
+  MediaType,
+} from '@server/constants/media';
 import { MediaServerType } from '@server/constants/server';
 import { getRepository } from '@server/datasource';
 import { Blocklist } from '@server/entity/Blocklist';
@@ -9,9 +13,10 @@ import type { User } from '@server/entity/User';
 import { Watchlist } from '@server/entity/Watchlist';
 import type { DownloadingItem } from '@server/lib/downloadtracker';
 import downloadTracker from '@server/lib/downloadtracker';
+import { Permission } from '@server/lib/permissions';
 import { getSettings } from '@server/lib/settings';
 import logger from '@server/logger';
-import { DbAwareColumn } from '@server/utils/DbColumnHelper';
+import { DbAwareColumn, resolveDbType } from '@server/utils/DbColumnHelper';
 import { getHostname } from '@server/utils/getHostname';
 import {
   AfterLoad,
@@ -21,6 +26,7 @@ import {
   OneToMany,
   OneToOne,
   PrimaryGeneratedColumn,
+  UpdateDateColumn,
 } from 'typeorm';
 import Issue from './Issue';
 import { MediaRequest } from './MediaRequest';
@@ -32,25 +38,24 @@ class Media {
   public static async getRelatedMedia(
     user: User | undefined,
     itemsOrIds: { tmdbId: number; mediaType: string }[] | number | number[],
-    type?: MediaType
+    typeOrOptions?:
+      | MediaType
+      | { mediaType?: MediaType; includeActiveRequest?: boolean }
   ): Promise<Media[]> {
     const mediaRepository = getRepository(Media);
+    const type =
+      typeof typeOrOptions === 'string'
+        ? typeOrOptions
+        : typeOrOptions?.mediaType;
+    const includeActiveRequest =
+      typeof typeOrOptions === 'object' && typeOrOptions.includeActiveRequest;
+    const items = (Array.isArray(itemsOrIds) ? itemsOrIds : [itemsOrIds]).map(
+      (item) =>
+        typeof item === 'number' ? { tmdbId: item, mediaType: type } : item
+    );
 
     try {
-      const isMediaItems =
-        Array.isArray(itemsOrIds) &&
-        itemsOrIds.every((item) => typeof item === 'object');
-      const finalIds = isMediaItems
-        ? [
-            ...new Set(
-              (itemsOrIds as { tmdbId: number; mediaType: string }[]).map(
-                (item) => item.tmdbId
-              )
-            ),
-          ]
-        : Array.isArray(itemsOrIds)
-          ? itemsOrIds
-          : [itemsOrIds];
+      const finalIds = [...new Set(items.map((item) => item.tmdbId))];
 
       if (finalIds.length === 0) {
         return [];
@@ -68,16 +73,40 @@ class Media {
         .where(`media.${key} in (:...finalIds)`, { finalIds })
         .getMany();
 
-      if (isMediaItems) {
-        const items = itemsOrIds as { tmdbId: number; mediaType: string }[];
-        return media.filter((m) =>
-          items.some(
-            (item) => item.tmdbId === m.tmdbId && item.mediaType === m.mediaType
-          )
-        );
+      const relatedMedia = media.filter((m) =>
+        items.some(
+          (item) =>
+            item.tmdbId === m[key] &&
+            (!item.mediaType || item.mediaType === m.mediaType)
+        )
+      );
+
+      if (
+        includeActiveRequest &&
+        getSettings().main.hideRequested &&
+        relatedMedia.length > 0
+      ) {
+        const activeRequestMediaIds = await mediaRepository
+          .createQueryBuilder('media')
+          .select('media.id', 'id')
+          .distinct(true)
+          .innerJoin('media.requests', 'request')
+          .where('media.id IN (:...mediaIds)', {
+            mediaIds: relatedMedia.map((m) => m.id),
+          })
+          .andWhere('request.status IN (:...statuses)', {
+            statuses: [MediaRequestStatus.PENDING, MediaRequestStatus.APPROVED],
+          })
+          .getRawMany<{ id: number }>();
+
+        const activeIds = new Set(activeRequestMediaIds.map((row) => row.id));
+
+        relatedMedia.forEach((m) => {
+          m.hasActiveRequest = activeIds.has(m.id);
+        });
       }
 
-      return media;
+      return relatedMedia;
     } catch (e) {
       logger.error(e.message);
       return [];
@@ -127,9 +156,11 @@ class Media {
   public hcId?: number;
 
   @Column({ type: 'int', default: MediaStatus.UNKNOWN })
+  @Index()
   public status: MediaStatus;
 
   @Column({ type: 'int', default: MediaStatus.UNKNOWN })
+  @Index()
   public statusAlt: MediaStatus;
 
   @OneToMany(() => MediaRequest, (request) => request.media, {
@@ -155,10 +186,9 @@ class Media {
   @DbAwareColumn({ type: 'datetime', default: () => 'CURRENT_TIMESTAMP' })
   public createdAt: Date;
 
-  @DbAwareColumn({
-    type: 'datetime',
+  @UpdateDateColumn({
+    type: resolveDbType('datetime'),
     default: () => 'CURRENT_TIMESTAMP',
-    onUpdate: 'CURRENT_TIMESTAMP',
   })
   public updatedAt: Date;
 
@@ -213,6 +243,7 @@ class Media {
 
   public serviceUrl?: string;
   public serviceUrlAlt?: string;
+  public hasActiveRequest?: boolean;
   public downloadStatus?: DownloadingItem[] = [];
   public downloadStatusAlt?: DownloadingItem[] = [];
 
@@ -323,6 +354,23 @@ class Media {
 
   public hasHcId(): this is Media & { hcId: number } {
     return typeof this.hcId === 'number';
+  }
+
+  public resetServiceData(is4k?: boolean): void {
+    if (is4k === undefined || !is4k) {
+      this.serviceId = null;
+      this.externalServiceId = null;
+      this.externalServiceSlug = null;
+      this.ratingKey = null;
+      this.jellyfinMediaId = null;
+    }
+    if (is4k === undefined || is4k) {
+      this.serviceId4k = null;
+      this.externalServiceId4k = null;
+      this.externalServiceSlug4k = null;
+      this.ratingKey4k = null;
+      this.jellyfinMediaId4k = null;
+    }
   }
 
   @AfterLoad()
@@ -553,6 +601,38 @@ class Media {
         );
       }
     }
+  }
+
+  public filter(user?: User): Media {
+    const canViewIssues =
+      user?.hasPermission(
+        [
+          Permission.MANAGE_ISSUES,
+          Permission.VIEW_ISSUES,
+          Permission.CREATE_ISSUES,
+        ],
+        { type: 'or' }
+      ) ?? false;
+
+    return {
+      ...this,
+      requests: (this.requests ?? []).map((request) => ({
+        ...request,
+        requestedBy: request.requestedBy?.filter(),
+        modifiedBy: request.modifiedBy?.filter(),
+      })),
+      // the detail pages call issues.filter() without a null check
+      issues: canViewIssues
+        ? (this.issues ?? []).map(
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+            ({ comments, problemSeason, problemEpisode, ...issue }) => ({
+              ...issue,
+              createdBy: issue.createdBy?.filter(),
+              modifiedBy: issue.modifiedBy?.filter(),
+            })
+          )
+        : [],
+    } as Media;
   }
 }
 

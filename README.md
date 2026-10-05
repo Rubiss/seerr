@@ -22,17 +22,39 @@
 >
 > #### Note: Image caching is forced for hardcover
 
-<div align="center">⚠️ <strong>NOTE:</strong> We are currently in the process of merging Overseerr and Jellyseerr into this unified repository.</div>
+## Immediate book availability
 
-<h1 align="center" style="font-size: 4em;">🚧 Seerr</h1>
+This book-support branch is based on the official Seerr **v3.5.0** release.
+Bookshelf can notify Seerr as soon as an ebook or audiobook is imported. Seerr
+then reads the book's current state from that Bookshelf server, marks the correct
+format available, and completes its approved requests.
+
+For **each** Bookshelf server:
+
+1. Enable **Sync** on its Readarr entry in Seerr's service settings.
+2. In Bookshelf, open **Settings → Connect → Add → Webhook**.
+3. Set the URL to `http://seerr:5055/api/v1/webhook/readarr/<serverId>`, replacing
+   `<serverId>` with that entry's numeric `id` from Seerr's `GET /api/v1/settings/readarr`.
+   Use a Seerr address reachable from Bookshelf; include any configured proxy base path.
+4. Select **POST**, use username `seerr`, and use the **Seerr API key** as the password.
+5. Enable **On Release Import** and **On Upgrade**, then test and save.
+
+Configure ebook and audiobook instances separately with their corresponding
+server IDs. A connection test makes no library changes. Repeated import/upgrade
+events are safe; incomplete imports stay processing. Scheduled scans remain a
+fallback for missed notifications and older library items.
+
+<p align="center">
+<img src="./public/logo_full.svg" alt="Seerr" style="margin: 20px 0;">
+</p>
 <p align="center">
 <img src="https://github.com/seerr-team/seerr/actions/workflows/release.yml/badge.svg" alt="Seerr Release" />
 <img src="https://github.com/seerr-team/seerr/actions/workflows/ci.yml/badge.svg" alt="Seerr CI">
 </p>
 <p align="center">
 <a href="https://discord.gg/seerr"><img src="https://img.shields.io/discord/783137440809746482" alt="Discord"></a>
-<a href="https://hub.docker.com/r/fallenbagel/jellyseerr"><img src="https://img.shields.io/docker/pulls/fallenbagel/jellyseerr" alt="Docker pulls"></a>
-<a href="http://translate.jellyseerr.dev/engage/jellyseerr/"><img src="http://translate.jellyseerr.dev/widget/jellyseerr/jellyseerr-frontend/svg-badge.svg" alt="Translation status" /></a>
+<a href="https://hub.docker.com/r/seerr/seerr"><img src="https://img.shields.io/docker/pulls/seerr/seerr" alt="Docker pulls"></a>
+<a href="https://translate.seerr.dev/engage/seerr/"><img src="https://translate.seerr.dev/widget/seerr/svg-badge.svg" alt="Translation status" /></a>
 <a href="https://github.com/seerr-team/seerr/blob/develop/LICENSE"><img alt="GitHub" src="https://img.shields.io/github/license/seerr-team/seerr"></a>
 
 **Seerr** is a free and open source software application for managing requests for your media library. It integrates with the media server of your choice: [Jellyfin](https://jellyfin.org), [Plex](https://plex.tv), and [Emby](https://emby.media/). In addition, it integrates with your existing services, such as **[Sonarr](https://sonarr.tv/)**, **[Radarr](https://radarr.video/)**.
@@ -60,15 +82,15 @@ Check out our documentation for instructions on how to install and run Seerr:
 
 https://docs.seerr.dev/getting-started/
 
-### Packages:
-
-Archlinux: [AUR](https://aur.archlinux.org/packages/jellyseerr)
-
-Nix: [Nixpkg](https://search.nixos.org/packages?channel=unstable&show=jellyseerr)
-
 ## Preview
 
-<img src="./public/preview.jpg">
+<img src="./public/preview.jpg" alt="Seerr application preview" />
+
+## Migrating from Overseerr/Jellyseerr to Seerr
+
+Read our [release announcement](https://docs.seerr.dev/blog/seerr-release) to learn what Seerr means for Jellyseerr and Overseerr users.
+
+Please follow our [migration guide](https://docs.seerr.dev/migration-guide) for detailed instructions on migrating from Overseerr or Jellyseerr.
 
 ## Support
 

@@ -240,6 +240,9 @@ components:
         hideAvailable:
           type: boolean
           example: false
+        hideRequested:
+          type: boolean
+          example: false
         partialRequestsEnabled:
           type: boolean
           example: false
@@ -256,6 +259,9 @@ components:
           type: number
           example: 32
         enableSpecialEpisodes:
+          type: boolean
+          example: false
+        versionCheck:
           type: boolean
           example: false
     NetworkSettings:
@@ -777,10 +783,18 @@ components:
           example: A Label
     PublicSettings:
       type: object
+      required:
+        - initialized
+        - plexClientIdentifier
       properties:
         initialized:
           type: boolean
           example: false
+        plexClientIdentifier:
+          type: string
+          format: uuid
+          description: Instance Plex OAuth client identifier
+          example: 6919275e-142a-48d8-be6b-93594cbd4626
     MovieResult:
       type: object
       required:
@@ -1334,6 +1348,10 @@ components:
           type: number
         rootFolder:
           type: string
+        ignoreQuota:
+          type: boolean
+          example: false
+          description: If true, this request will not count against the user's quota. Requires MANAGE_REQUESTS permission.
       required:
         - id
         - status
@@ -1614,6 +1632,8 @@ components:
               type: string
             topic:
               type: string
+            tags:
+              type: string
             authMethodUsernamePassword:
               type: boolean
             username:
@@ -1623,6 +1643,10 @@ components:
             authMethodToken:
               type: boolean
             token:
+              type: string
+            priority:
+              type: number
+            locale:
               type: string
     NotificationEmailSettings:
       type: object
@@ -2015,8 +2039,10 @@ components:
         discordEnabledTypes:
           type: number
           nullable: true
-        discordId:
-          type: string
+        discordIds:
+          type: array
+          items:
+            type: string
           nullable: true
         pushbulletAccessToken:
           type: string
@@ -2384,6 +2410,10 @@ components:
           type: number
 
   securitySchemes:
+    webhookBasicAuth:
+      type: http
+      scheme: basic
+      description: Use username seerr and the Seerr API key as the password.
     cookieAuth:
       type: apiKey
       name: connect.sid
@@ -2394,13 +2424,274 @@ components:
       name: X-Api-Key
 
 paths:
+  /blacklist/{tmdbId}:
+    get:
+      summary: Get media from blocklist
+      description: |
+        **DEPRECATED**: Use `/blocklist/{tmdbId}` instead. This endpoint will be deprecated soon.
+      deprecated: true
+      tags:
+        - blocklist
+      parameters:
+        - in: path
+          name: tmdbId
+          description: tmdbId ID
+          required: true
+          example: '1'
+          schema:
+            type: string
+        - in: query
+          name: mediaType
+          required: true
+          schema:
+            type: string
+            enum:
+              - movie
+              - tv
+      responses:
+        '200':
+          description: Blocklist details in JSON
+    delete:
+      summary: Remove media from blocklist
+      description: |
+        **DEPRECATED**: Use `/blocklist/{tmdbId}` instead. This endpoint will be deprecated soon.
+      deprecated: true
+      tags:
+        - blocklist
+      parameters:
+        - in: path
+          name: tmdbId
+          description: tmdbId ID
+          required: true
+          example: '1'
+          schema:
+            type: string
+        - in: query
+          name: mediaType
+          required: true
+          schema:
+            type: string
+            enum:
+              - movie
+              - tv
+      responses:
+        '204':
+          description: Succesfully removed media item
+  /blacklist:
+    get:
+      summary: Returns blocklisted items
+      description: |
+        **DEPRECATED**: Use `/blocklist` instead. This endpoint will be deprecated soon.
+      deprecated: true
+      tags:
+        - blocklist
+      parameters:
+        - in: query
+          name: take
+          schema:
+            type: number
+            nullable: true
+            example: 25
+        - in: query
+          name: skip
+          schema:
+            type: number
+            nullable: true
+            example: 0
+        - in: query
+          name: search
+          schema:
+            type: string
+            nullable: true
+            example: dune
+        - in: query
+          name: filter
+          schema:
+            type: string
+            enum: [all, manual, blocklistedTags]
+            default: manual
+      responses:
+        '200':
+          description: Blocklisted items returned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pageInfo:
+                    $ref: '#/components/schemas/PageInfo'
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        user:
+                          $ref: '#/components/schemas/User'
+                        createdAt:
+                          type: string
+                          example: 2024-04-21T01:55:44.000Z
+                        id:
+                          type: number
+                          example: 1
+                        mediaType:
+                          type: string
+                          example: movie
+                        title:
+                          type: string
+                          example: Dune
+                        tmdbId:
+                          type: number
+                          example: 438631
+    post:
+      summary: Add media to blocklist
+      description: |
+        **DEPRECATED**: Use `/blocklist` instead. This endpoint will be deprecated soon.
+      deprecated: true
+      tags:
+        - blocklist
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Blocklist'
+      responses:
+        '201':
+          description: Item succesfully blocklisted
+        '412':
+          description: Item has already been blocklisted
+  /blocklist/collection/{collectionId}:
+    post:
+      summary: Add collection to blocklist
+      description: Adds all movies in a collection to the blocklist
+      tags:
+        - blocklist
+      parameters:
+        - in: path
+          name: collectionId
+          description: Collection ID
+          required: true
+          example: '1424991'
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '201':
+          description: Successfully added collection to blocklist
+        '500':
+          description: Error adding collection to blocklist
+    delete:
+      summary: Remove collection from blocklist
+      description: Removes all movies in a collection from the blocklist
+      tags:
+        - blocklist
+      parameters:
+        - in: path
+          name: collectionId
+          description: Collection ID
+          required: true
+          example: '1424991'
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Successfully removed collection from blocklist
+        '500':
+          description: Error removing collection from blocklist
+  /user/jellyfin/{jellyfinUserId}:
+    get:
+      summary: Get user by Jellyfin user ID
+      description: |
+        Retrieves user details by Jellyfin user ID in a JSON object. Returns filtered data based on the caller's permissions.
+      tags:
+        - users
+      parameters:
+        - in: path
+          name: jellyfinUserId
+          required: true
+          schema:
+            type: string
+          description: The Jellyfin user ID (32-character hexadecimal string)
+      responses:
+        '200':
+          description: User details in JSON
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '404':
+          description: User not found
+  /webhook/readarr/{serverId}:
+    post:
+      summary: Sync book availability after a Readarr or Bookshelf import
+      security:
+        - webhookBasicAuth: []
+        - apiKey: []
+      tags:
+        - books
+      parameters:
+        - in: path
+          name: serverId
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - eventType
+              properties:
+                eventType:
+                  type: string
+                  enum: [Test, Download]
+                book:
+                  type: object
+                  required: [id]
+                  properties:
+                    id:
+                      type: integer
+                      minimum: 1
+                  additionalProperties: true
+              additionalProperties: true
+      responses:
+        '204':
+          description: Import synchronized or connection test accepted
+        '400':
+          description: Invalid or unsupported event
+        '403':
+          description: Missing or invalid Seerr API key
+        '401':
+          description: Missing authentication credentials
+        '404':
+          description: Unknown Readarr server
+        '409':
+          description: Server synchronization is disabled
+        '502':
+          description: Import synchronization failed
   /status:
     get:
       summary: Get Seerr status
-      description: Returns the current Seerr status in a JSON object.
+      description: Returns the current Seerr status in a JSON object. updateAvailable and commitsBehind are omitted when checkUpdateAvailable is false.
       security: []
       tags:
         - public
+      parameters:
+        - in: query
+          name: checkUpdateAvailable
+          description: If false, updateAvailable and commitsBehind will be omitted from the response. Defaults to the versionCheck setting.
+          required: false
+          example: false
+          schema:
+            type: boolean
       responses:
         '200':
           description: Returned status
@@ -2556,21 +2847,6 @@ paths:
       description: Returns a list of Jellyfin libraries in a JSON array.
       tags:
         - settings
-      parameters:
-        - in: query
-          name: sync
-          description: Syncs the current libraries with the current Jellyfin server
-          schema:
-            type: string
-            nullable: true
-        - in: query
-          name: enable
-          explode: false
-          allowReserved: true
-          description: Comma separated list of libraries to enable. Any libraries not passed will be disabled!
-          schema:
-            type: string
-            nullable: true
       responses:
         '200':
           description: 'Jellyfin libraries returned'
@@ -2580,6 +2856,60 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/JellyfinLibrary'
+  /settings/jellyfin/library/{libraryId}:
+    put:
+      summary: Update a single Jellyfin library
+      description: Updates a single Jellyfin library with the provided values.
+      tags:
+        - settings
+      parameters:
+        - in: path
+          name: libraryId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - enabled
+              properties:
+                enabled:
+                  type: boolean
+                  example: true
+      responses:
+        '200':
+          description: 'Jellyfin library returned'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JellyfinLibrary'
+        '400':
+          description: 'Invalid request body'
+        '404':
+          description: 'Library does not exist'
+  /settings/jellyfin/library/sync:
+    post:
+      summary: Sync Jellyfin libraries
+      description: Syncs the current libraries with the current Jellyfin server. Enabled flags are preserved.
+      tags:
+        - settings
+      responses:
+        '200':
+          description: 'Jellyfin libraries returned'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/JellyfinLibrary'
+        '404':
+          description: 'No libraries found'
+        '501':
+          description: 'Automatic library grouping is not supported'
   /settings/jellyfin/users:
     get:
       summary: Get Jellyfin Users
@@ -2599,8 +2929,12 @@ paths:
                   properties:
                     username:
                       type: string
-                    userId:
-                      type: integer
+                    id:
+                      type: string
+                    thumb:
+                      type: string
+                    email:
+                      type: string
   /settings/jellyfin/sync:
     get:
       summary: Get status of full Jellyfin library sync
@@ -2707,21 +3041,56 @@ paths:
       description: Returns a list of Plex libraries in a JSON array.
       tags:
         - settings
+      responses:
+        '200':
+          description: 'Plex libraries returned'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PlexLibrary'
+  /settings/plex/library/{libraryId}:
+    put:
+      summary: Update a single Plex library
+      description: Updates a single Plex library with the provided values.
+      tags:
+        - settings
       parameters:
-        - in: query
-          name: sync
-          description: Syncs the current libraries with the current Plex server
+        - in: path
+          name: libraryId
+          required: true
           schema:
             type: string
-            nullable: true
-        - in: query
-          name: enable
-          explode: false
-          allowReserved: true
-          description: Comma separated list of libraries to enable. Any libraries not passed will be disabled!
-          schema:
-            type: string
-            nullable: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - enabled
+              properties:
+                enabled:
+                  type: boolean
+                  example: true
+      responses:
+        '200':
+          description: 'Plex library returned'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlexLibrary'
+        '400':
+          description: 'Invalid request body'
+        '404':
+          description: 'Library does not exist'
+  /settings/plex/library/sync:
+    post:
+      summary: Sync Plex libraries
+      description: Syncs the current libraries with the current Plex server. Enabled flags are preserved.
+      tags:
+        - settings
       responses:
         '200':
           description: 'Plex libraries returned'
@@ -4407,6 +4776,85 @@ paths:
               required:
                 - username
                 - password
+  /auth/jellyfin/quickconnect/initiate:
+    post:
+      summary: Initiate Jellyfin Quick Connect
+      description: Initiates a Quick Connect session and returns a code for the user to authorize on their Jellyfin server.
+      security: []
+      tags:
+        - auth
+      responses:
+        '200':
+          description: Quick Connect session initiated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+                    example: '123456'
+                  secret:
+                    type: string
+                    example: 'abc123def456'
+        '500':
+          description: Failed to initiate Quick Connect
+  /auth/jellyfin/quickconnect/check:
+    get:
+      summary: Check Quick Connect authorization status
+      description: Checks if the Quick Connect code has been authorized by the user.
+      security: []
+      tags:
+        - auth
+      parameters:
+        - in: query
+          name: secret
+          required: true
+          schema:
+            type: string
+          description: The secret returned from the initiate endpoint
+      responses:
+        '200':
+          description: Authorization status returned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  authenticated:
+                    type: boolean
+                    example: false
+        '404':
+          description: Quick Connect session not found or expired
+  /auth/jellyfin/quickconnect/authenticate:
+    post:
+      summary: Authenticate with Quick Connect
+      description: Completes the Quick Connect authentication flow and creates a user session.
+      security: []
+      tags:
+        - auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                secret:
+                  type: string
+              required:
+                - secret
+      responses:
+        '200':
+          description: Successfully authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '403':
+          description: Quick Connect not authorized or access denied
+        '500':
+          description: Authentication failed
   /auth/local:
     post:
       summary: Sign in using a local account
@@ -5036,27 +5484,27 @@ paths:
           description: Item succesfully blocklisted
         '412':
           description: Item has already been blocklisted
-  /blocklist/{mediaType}/{id}:
+  /blocklist/{tmdbId}:
     get:
       summary: Get media from blocklist
       tags:
         - blocklist
       parameters:
         - in: path
-          name: mediaType
-          description: Media type (movie, tv, book, collection)
-          required: true
-          example: 'movie'
-          schema:
-            type: string
-            enum: [movie, tv, book, collection]
-        - in: path
-          name: id
-          description: External ID (tmdbId for movies/tv, hcId for books)
+          name: tmdbId
+          description: TMDB ID for movies/TV or Hardcover ID for books
           required: true
           example: '1'
           schema:
             type: string
+        - in: query
+          name: mediaType
+          required: true
+          schema:
+            type: string
+            enum:
+              - movie
+              - tv
       responses:
         '200':
           description: Blocklist details in JSON
@@ -5066,20 +5514,20 @@ paths:
         - blocklist
       parameters:
         - in: path
-          name: mediaType
-          description: Media type (movie, tv, book, collection)
-          required: true
-          example: 'movie'
-          schema:
-            type: string
-            enum: [movie, tv, book, collection]
-        - in: path
-          name: id
-          description: External ID (tmdbId for movies/tv, hcId for books)
+          name: tmdbId
+          description: TMDB ID for movies/TV or Hardcover ID for books
           required: true
           example: '1'
           schema:
             type: string
+        - in: query
+          name: mediaType
+          required: true
+          schema:
+            type: string
+            enum:
+              - movie
+              - tv
       responses:
         '204':
           description: Succesfully removed media item
@@ -5358,6 +5806,40 @@ paths:
           description: Unlink request invalid
         '404':
           description: User does not exist
+  /user/{userId}/settings/linked-accounts/jellyfin/quickconnect:
+    post:
+      summary: Link Jellyfin/Emby account with Quick Connect
+      description: Links a Jellyfin/Emby account to the user's profile using Quick Connect authentication
+      tags:
+        - users
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema:
+            type: number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                secret:
+                  type: string
+              required:
+                - secret
+      responses:
+        '400':
+          description: Invalid Quick Connect secret
+        '204':
+          description: Account successfully linked
+        '401':
+          description: Unauthorized
+        '422':
+          description: Account already linked
+        '500':
+          description: Server error
   /user/{userId}/settings/notifications:
     get:
       summary: Get notification settings for a user
@@ -6618,6 +7100,9 @@ paths:
                       enum: [all]
                 isAlt:
                   type: boolean
+                is4k:
+                  type: boolean
+                  description: Legacy alias for isAlt
                   example: false
                 serverId:
                   type: number
@@ -6632,6 +7117,10 @@ paths:
                 userId:
                   type: number
                   nullable: true
+                ignoreQuota:
+                  type: boolean
+                  example: false
+                  description: If true, this request will not count against the user's quota. Requires MANAGE_REQUESTS permission.
               required:
                 - mediaType
                 - mediaId
@@ -6749,6 +7238,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MediaRequest'
+        '409':
+          description: Only pending requests can be modified
     delete:
       summary: Delete request
       description: Removes a request. If the user has the `MANAGE_REQUESTS` permission, any request can be removed. Otherwise, only pending requests can be removed.
@@ -6789,6 +7280,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MediaRequest'
+        '409':
+          description: Only failed requests can be retried
   /request/{requestId}/{status}:
     post:
       summary: Update a request's status
@@ -6820,6 +7313,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MediaRequest'
+        '400':
+          description: Status must be approve or decline
+        '409':
+          description: Only pending requests can be approved or declined
   /book/{bookId}:
     get:
       summary: Get book details
@@ -7955,6 +8452,9 @@ paths:
                   type: string
                 mediaId:
                   type: number
+                userId:
+                  type: number
+                  nullable: true
       responses:
         '201':
           description: Succesfully created the issue
@@ -8379,6 +8879,70 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OverrideRule'
+  /overrideRule/advancedRequest:
+    post:
+      summary: Advanced override rule request
+      description: Processes an advanced override rule request.
+      tags:
+        - overriderule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - mediaType
+                - tmdbId
+              properties:
+                mediaType:
+                  type: string
+                tmdbId:
+                  type: number
+                  example: 1
+                is4k:
+                  type: boolean
+                  example: false
+                requestId:
+                  type: number
+                  nullable: true
+                requestUser:
+                  type: number
+                  nullable: true
+                tags:
+                  type: array
+                  items:
+                    type: number
+                  nullable: true
+                serviceId:
+                  type: number
+                  nullable: true
+      responses:
+        '200':
+          description: Advanced override rule request processed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rootFolder:
+                    type: string
+                    nullable: true
+                  profileId:
+                    type: number
+                    nullable: true
+                  tags:
+                    type: array
+                    items:
+                      type: number
+                    nullable: true
+        '403':
+          description: User does not have permission to modify the request user
+        '404':
+          description: User, media or request not found
+        '500':
+          description: Unable to evaluate override rules
+
 security:
   - cookieAuth: []
   - apiKey: []

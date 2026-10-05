@@ -141,7 +141,9 @@ const TitleCard = ({
   const onClickDeleteWatchlistBtn = async (): Promise<void> => {
     setIsUpdating(true);
     try {
-      const response = await axios.delete<Watchlist>('/api/v1/watchlist/' + id);
+      const response = await axios.delete<Watchlist>(
+        `/api/v1/watchlist/${id}?mediaType=${mediaType}`
+      );
 
       if (response.status === 204) {
         addToast(
@@ -175,12 +177,16 @@ const TitleCard = ({
 
     if (topNode) {
       try {
-        await axios.post('/api/v1/blocklist', {
-          externalId: id,
-          mediaType,
-          title,
-          user: user?.id,
-        });
+        if (mediaType === 'collection') {
+          await axios.post(`/api/v1/blocklist/collection/${id}`);
+        } else {
+          await axios.post('/api/v1/blocklist', {
+            externalId: id,
+            mediaType,
+            title,
+            user: user?.id,
+          });
+        }
         addToast(
           <span>
             {intl.formatMessage(globalMessages.blocklistSuccess, {
@@ -191,6 +197,9 @@ const TitleCard = ({
           { appearance: 'success', autoDismiss: true }
         );
         setCurrentStatus(MediaStatus.BLOCKLISTED);
+        if (mutateParent) {
+          mutateParent();
+        }
       } catch (e) {
         if (e?.response?.status === 412) {
           addToast(
@@ -225,20 +234,57 @@ const TitleCard = ({
     const topNode = cardRef.current;
 
     if (topNode) {
-      const res = await axios.delete(`/api/v1/blocklist/${mediaType}/${id}`);
+      try {
+        if (mediaType === 'collection') {
+          const res = await axios.delete(`/api/v1/blocklist/collection/${id}`);
 
-      if (res.status === 204) {
-        addToast(
-          <span>
-            {intl.formatMessage(globalMessages.removeFromBlocklistSuccess, {
-              title,
-              strong: (msg: React.ReactNode) => <strong>{msg}</strong>,
-            })}
-          </span>,
-          { appearance: 'success', autoDismiss: true }
-        );
-        setCurrentStatus(MediaStatus.UNKNOWN);
-      } else {
+          if (res.status === 204) {
+            addToast(
+              <span>
+                {intl.formatMessage(globalMessages.removeFromBlocklistSuccess, {
+                  title,
+                  strong: (msg: React.ReactNode) => <strong>{msg}</strong>,
+                })}
+              </span>,
+              { appearance: 'success', autoDismiss: true }
+            );
+            setCurrentStatus(MediaStatus.UNKNOWN);
+            if (mutateParent) {
+              mutateParent();
+            }
+          } else {
+            addToast(intl.formatMessage(globalMessages.blocklistError), {
+              appearance: 'error',
+              autoDismiss: true,
+            });
+          }
+        } else {
+          const res = await axios.delete(
+            `/api/v1/blocklist/${id}?mediaType=${mediaType}`
+          );
+
+          if (res.status === 204) {
+            addToast(
+              <span>
+                {intl.formatMessage(globalMessages.removeFromBlocklistSuccess, {
+                  title,
+                  strong: (msg: React.ReactNode) => <strong>{msg}</strong>,
+                })}
+              </span>,
+              { appearance: 'success', autoDismiss: true }
+            );
+            setCurrentStatus(MediaStatus.UNKNOWN);
+            if (mutateParent) {
+              mutateParent();
+            }
+          } else {
+            addToast(intl.formatMessage(globalMessages.blocklistError), {
+              appearance: 'error',
+              autoDismiss: true,
+            });
+          }
+        }
+      } catch {
         addToast(intl.formatMessage(globalMessages.blocklistError), {
           appearance: 'error',
           autoDismiss: true,
@@ -259,11 +305,11 @@ const TitleCard = ({
   const showRequestButton = hasPermission(
     [
       Permission.REQUEST,
-      mediaType === 'movie' ||
-      mediaType === 'collection' ||
       mediaType === 'book'
-        ? Permission.REQUEST_MOVIE
-        : Permission.REQUEST_TV,
+        ? Permission.REQUEST_BOOK
+        : mediaType === 'movie' || mediaType === 'collection'
+          ? Permission.REQUEST_MOVIE
+          : Permission.REQUEST_TV,
     ],
     { type: 'or' }
   );
@@ -363,8 +409,10 @@ const TitleCard = ({
                       (id % 9) + 1
                     }.png`
                 : image
-                  ? `https://image.tmdb.org/t/p/w300_and_h450_face${image}`
-                  : `/images/jellyseerr_poster_not_found_logo_top.png`
+                  ? image.startsWith('/')
+                    ? `https://image.tmdb.org/t/p/w300_and_h450_face${image}`
+                    : image
+                  : `/images/seerr_poster_not_found_logo_top.png`
             }
             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
             fill

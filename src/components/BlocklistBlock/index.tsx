@@ -38,14 +38,14 @@ const BlocklistBlock = ({
   const [isUpdating, setIsUpdating] = useState(false);
   const { addToast } = useToasts();
   const { data } = useSWR<Blocklist>(
-    `/api/v1/blocklist/${mediaType}/${mediaId}`
+    `/api/v1/blocklist/${mediaId}?mediaType=${mediaType}`
   );
 
   const removeFromBlocklist = async (mediaId: number, title?: string) => {
     setIsUpdating(true);
 
     try {
-      await axios.delete(`/api/v1/blocklist/${mediaType}/${mediaId}`);
+      await axios.delete(`/api/v1/blocklist/${mediaId}?mediaType=${mediaType}`);
 
       addToast(
         <span>

@@ -14,6 +14,7 @@ import { useIntl } from 'react-intl';
 const messages = defineMessages('components.StatusBadge', {
   status: '{status}',
   status4k: '4K {status}',
+  statusAudio: 'Audiobook {status}',
   playonplex: 'Play on {mediaServerName}',
   openinarr: 'Open in {arr}',
   managemedia: 'Manage {mediaType}',
@@ -31,6 +32,7 @@ interface StatusBadgeProps {
   mediaId?: number;
   mediaType?: 'movie' | 'tv' | 'book';
   title?: string | string[];
+  statusLabelOverride?: string;
 }
 
 const StatusBadge = ({
@@ -43,6 +45,7 @@ const StatusBadge = ({
   mediaId,
   mediaType,
   title,
+  statusLabelOverride,
 }: StatusBadgeProps) => {
   const intl = useIntl();
   const { hasPermission } = useUser();
@@ -57,6 +60,7 @@ const StatusBadge = ({
 
   if (
     mediaType &&
+    mediaType !== 'book' &&
     plexUrl &&
     hasPermission(
       isAlt
@@ -146,8 +150,12 @@ const StatusBadge = ({
 
   const badgeDownloadProgress = (
     <div
-      className={`absolute left-0 top-0 z-10 flex h-full bg-opacity-80 ${
-        status === MediaStatus.PROCESSING ? 'bg-indigo-500' : 'bg-green-500'
+      className={`absolute left-0 top-0 z-10 flex h-full ${
+        status === MediaStatus.DELETED
+          ? 'bg-red-600/80'
+          : status === MediaStatus.PROCESSING
+            ? 'bg-indigo-500/80'
+            : 'bg-green-500/80'
       } transition-all duration-200 ease-in-out`}
       style={{
         width: `${
@@ -173,8 +181,7 @@ const StatusBadge = ({
             badgeType="success"
             href={mediaLink}
             className={`${
-              inProgress &&
-              'relative !bg-gray-700 !bg-opacity-80 !px-0 hover:!bg-gray-700'
+              inProgress && 'relative !bg-gray-700/80 !px-0 hover:!bg-gray-700'
             } overflow-hidden`}
           >
             {inProgress && badgeDownloadProgress}
@@ -185,7 +192,11 @@ const StatusBadge = ({
             >
               <span>
                 {intl.formatMessage(
-                  isAlt ? messages.status4k : messages.status,
+                  isAlt
+                    ? mediaType === 'book'
+                      ? messages.statusAudio
+                      : messages.status4k
+                    : messages.status,
                   {
                     status: inProgress
                       ? intl.formatMessage(globalMessages.processing)
@@ -239,8 +250,7 @@ const StatusBadge = ({
             badgeType="success"
             href={mediaLink}
             className={`${
-              inProgress &&
-              'relative !bg-gray-700 !bg-opacity-80 !px-0 hover:!bg-gray-700'
+              inProgress && 'relative !bg-gray-700/80 !px-0 hover:!bg-gray-700'
             } overflow-hidden`}
           >
             {inProgress && badgeDownloadProgress}
@@ -251,7 +261,11 @@ const StatusBadge = ({
             >
               <span>
                 {intl.formatMessage(
-                  isAlt ? messages.status4k : messages.status,
+                  isAlt
+                    ? mediaType === 'book'
+                      ? messages.statusAudio
+                      : messages.status4k
+                    : messages.status,
                   {
                     status: inProgress
                       ? intl.formatMessage(globalMessages.processing)
@@ -305,8 +319,7 @@ const StatusBadge = ({
             badgeType="primary"
             href={mediaLink}
             className={`${
-              inProgress &&
-              'relative !bg-gray-700 !bg-opacity-80 !px-0 hover:!bg-gray-700'
+              inProgress && 'relative !bg-gray-700/80 !px-0 hover:!bg-gray-700'
             } overflow-hidden`}
           >
             {inProgress && badgeDownloadProgress}
@@ -317,7 +330,11 @@ const StatusBadge = ({
             >
               <span>
                 {intl.formatMessage(
-                  isAlt ? messages.status4k : messages.status,
+                  isAlt
+                    ? mediaType === 'book'
+                      ? messages.statusAudio
+                      : messages.status4k
+                    : messages.status,
                   {
                     status: inProgress
                       ? intl.formatMessage(globalMessages.processing)
@@ -360,9 +377,16 @@ const StatusBadge = ({
       return (
         <Tooltip content={mediaLinkDescription}>
           <Badge badgeType="warning" href={mediaLink}>
-            {intl.formatMessage(isAlt ? messages.status4k : messages.status, {
-              status: intl.formatMessage(globalMessages.pending),
-            })}
+            {intl.formatMessage(
+              isAlt
+                ? mediaType === 'book'
+                  ? messages.statusAudio
+                  : messages.status4k
+                : messages.status,
+              {
+                status: intl.formatMessage(globalMessages.pending),
+              }
+            )}
           </Badge>
         </Tooltip>
       );
@@ -371,20 +395,87 @@ const StatusBadge = ({
       return (
         <Tooltip content={mediaLinkDescription}>
           <Badge badgeType="danger" href={mediaLink}>
-            {intl.formatMessage(isAlt ? messages.status4k : messages.status, {
-              status: intl.formatMessage(globalMessages.blocklisted),
-            })}
+            {intl.formatMessage(
+              isAlt
+                ? mediaType === 'book'
+                  ? messages.statusAudio
+                  : messages.status4k
+                : messages.status,
+              {
+                status:
+                  statusLabelOverride ??
+                  intl.formatMessage(globalMessages.blocklisted),
+              }
+            )}
           </Badge>
         </Tooltip>
       );
 
     case MediaStatus.DELETED:
       return (
-        <Tooltip content={mediaLinkDescription}>
-          <Badge badgeType="danger">
-            {intl.formatMessage(isAlt ? messages.status4k : messages.status, {
-              status: intl.formatMessage(globalMessages.deleted),
-            })}
+        <Tooltip
+          content={inProgress ? tooltipContent : mediaLinkDescription}
+          className={`${
+            inProgress && 'hidden max-h-96 w-96 overflow-y-auto sm:block'
+          }`}
+          tooltipConfig={{
+            ...(inProgress && { interactive: true, delayHide: 100 }),
+          }}
+        >
+          <Badge
+            badgeType="danger"
+            href={mediaLink}
+            className={`${
+              inProgress && 'relative !bg-gray-700/80 !px-0 hover:!bg-gray-700'
+            } overflow-hidden`}
+          >
+            {inProgress && badgeDownloadProgress}
+            <div
+              className={`relative z-20 flex items-center ${
+                inProgress && 'px-2'
+              }`}
+            >
+              <span>
+                {intl.formatMessage(
+                  isAlt
+                    ? mediaType === 'book'
+                      ? messages.statusAudio
+                      : messages.status4k
+                    : messages.status,
+                  {
+                    status: inProgress
+                      ? intl.formatMessage(globalMessages.processing)
+                      : intl.formatMessage(globalMessages.deleted),
+                  }
+                )}
+              </span>
+              {inProgress && (
+                <>
+                  {mediaType === 'tv' &&
+                    downloadItem[0].episode &&
+                    (downloadItem.length > 1 &&
+                    downloadItem.every(
+                      (item) =>
+                        item.downloadId &&
+                        item.downloadId === downloadItem[0].downloadId
+                    ) ? (
+                      <span className="ml-1">
+                        {intl.formatMessage(messages.seasonnumber, {
+                          seasonNumber: downloadItem[0].episode.seasonNumber,
+                        })}
+                      </span>
+                    ) : (
+                      <span className="ml-1">
+                        {intl.formatMessage(messages.seasonepisodenumber, {
+                          seasonNumber: downloadItem[0].episode.seasonNumber,
+                          episodeNumber: downloadItem[0].episode.episodeNumber,
+                        })}
+                      </span>
+                    ))}
+                  <Spinner className="ml-1 h-3 w-3" />
+                </>
+              )}
+            </div>
           </Badge>
         </Tooltip>
       );

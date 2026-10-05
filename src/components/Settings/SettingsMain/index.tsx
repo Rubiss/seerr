@@ -39,6 +39,12 @@ const messages = defineMessages('components.Settings.SettingsMain', {
   discoverRegionTip: 'Filter content by regional availability',
   originallanguage: 'Discover Language',
   originallanguageTip: 'Filter content by original language',
+  blocklistRegion: 'Blocklist Region',
+  blocklistRegionTip:
+    'Region used for blocklist content scanning (independent of discover settings)',
+  blocklistLanguage: 'Blocklist Language',
+  blocklistLanguageTip:
+    'Language used for blocklist content scanning (independent of discover settings)',
   blocklistedTags: 'Blocklist Content with Tags',
   blocklistedTagsTip:
     'Automatically add content with tags to the blocklist using the "Process Blocklisted Tags" job',
@@ -57,6 +63,9 @@ const messages = defineMessages('components.Settings.SettingsMain', {
   hideAvailable: 'Hide Available Media',
   hideAvailableTip:
     'Hide available media from the discover pages but not search results',
+  hideRequested: 'Hide Requested Media',
+  hideRequestedTip:
+    'Hide media that has been requested from the discover pages but not search results',
   cacheImages: 'Enable Image Caching',
   cacheImagesTip:
     'Cache externally sourced images (requires a significant amount of disk space)',
@@ -69,6 +78,8 @@ const messages = defineMessages('components.Settings.SettingsMain', {
   youtubeUrl: 'YouTube URL',
   youtubeUrlTip:
     'Base URL for YouTube videos if a self-hosted YouTube instance is used.',
+  versionCheck: 'Version Check',
+  versionCheckTip: 'Automatically check for new versions on GitHub.',
   validationUrl: 'You must provide a valid URL',
   validationUrlTrailingSlash: 'URL must not end in a trailing slash',
 });
@@ -167,16 +178,20 @@ const SettingsMain = () => {
             applicationUrl: data?.applicationUrl,
             hideAvailable: data?.hideAvailable,
             hideBlocklisted: data?.hideBlocklisted,
+            hideRequested: data?.hideRequested,
             locale: data?.locale ?? 'en',
             discoverRegion: data?.discoverRegion,
             originalLanguage: data?.originalLanguage,
             streamingRegion: data?.streamingRegion || 'US',
+            blocklistRegion: data?.blocklistRegion || '',
+            blocklistLanguage: data?.blocklistLanguage || '',
             blocklistedTags: data?.blocklistedTags,
             blocklistedTagsLimit: data?.blocklistedTagsLimit || 50,
             partialRequestsEnabled: data?.partialRequestsEnabled,
             enableSpecialEpisodes: data?.enableSpecialEpisodes,
             cacheImages: data?.cacheImages,
             youtubeUrl: data?.youtubeUrl,
+            versionCheck: data?.versionCheck,
           }}
           enableReinitialize
           validationSchema={MainSettingsSchema}
@@ -188,19 +203,23 @@ const SettingsMain = () => {
                 applicationUrl: values.applicationUrl,
                 hideAvailable: values.hideAvailable,
                 hideBlocklisted: values.hideBlocklisted,
+                hideRequested: values.hideRequested,
                 locale: values.locale,
                 discoverRegion: values.discoverRegion,
                 streamingRegion: values.streamingRegion,
                 originalLanguage: values.originalLanguage,
+                blocklistRegion: values.blocklistRegion,
+                blocklistLanguage: values.blocklistLanguage,
                 blocklistedTags: values.blocklistedTags,
                 blocklistedTagsLimit: values.blocklistedTagsLimit,
                 partialRequestsEnabled: values.partialRequestsEnabled,
                 enableSpecialEpisodes: values.enableSpecialEpisodes,
                 cacheImages: values.cacheImages,
                 youtubeUrl: values.youtubeUrl,
+                versionCheck: values?.versionCheck,
               });
               mutate('/api/v1/settings/public');
-              mutate('/api/v1/status');
+              mutate('/api/v1/status?checkUpdateAvailable=false');
 
               if (setLocale) {
                 setLocale(
@@ -235,61 +254,61 @@ const SettingsMain = () => {
             return (
               <Form className="section" data-testid="settings-main-form">
                 {userHasPermission(Permission.ADMIN) && (
-                  <>
-                    <div className="form-row">
-                      <label htmlFor="apiKey" className="text-label">
-                        {intl.formatMessage(messages.apikey)}
-                      </label>
-                      <div className="form-input-area">
-                        <div className="form-input-field">
-                          <SensitiveInput
-                            type="text"
-                            id="apiKey"
-                            className="rounded-l-only"
-                            value={data?.apiKey}
-                            readOnly
-                          />
-                          <CopyButton
-                            textToCopy={data?.apiKey ?? ''}
-                            toastMessage={intl.formatMessage(
-                              messages.apikeyCopied
-                            )}
-                            key={data?.apiKey}
-                          />
-                          <button
-                            onClick={(e) => {
-                              e.preventDefault();
-                              regenerate();
-                            }}
-                            className="input-action"
-                            type="button"
-                          >
-                            <ArrowPathIcon />
-                          </button>
-                        </div>
+                  <div className="form-row">
+                    <label htmlFor="apiKey" className="text-label">
+                      {intl.formatMessage(messages.apikey)}
+                    </label>
+                    <div className="form-input-area">
+                      <div className="form-input-field">
+                        <SensitiveInput
+                          type="text"
+                          id="apiKey"
+                          className="rounded-l-only"
+                          value={data?.apiKey}
+                          readOnly
+                        />
+                        <CopyButton
+                          textToCopy={data?.apiKey ?? ''}
+                          toastMessage={intl.formatMessage(
+                            messages.apikeyCopied
+                          )}
+                          key={data?.apiKey}
+                        />
+                        <button
+                          onClick={(e) => {
+                            e.preventDefault();
+                            regenerate();
+                          }}
+                          className="input-action"
+                          type="button"
+                        >
+                          <ArrowPathIcon />
+                        </button>
                       </div>
                     </div>
-                    <div className="form-row">
-                      <label htmlFor="hardcoverapikey" className="text-label">
-                        {intl.formatMessage(messages.hardcoverapikey)}
-                      </label>
-                      <div className="form-input-area">
-                        <div className="form-input-field">
-                          <SensitiveInput
-                            as="field"
-                            type="text"
-                            id="hardcoverapikey"
-                            name="hardcoverapikey"
-                            className="rounded-l-only"
-                          />
-                          <CopyButton
-                            textToCopy={values?.hardcoverapikey ?? ''}
-                            key={values?.hardcoverapikey}
-                          />
-                        </div>
+                  </div>
+                )}
+                {userHasPermission(Permission.ADMIN) && (
+                  <div className="form-row">
+                    <label htmlFor="hardcoverapikey" className="text-label">
+                      {intl.formatMessage(messages.hardcoverapikey)}
+                    </label>
+                    <div className="form-input-area">
+                      <div className="form-input-field">
+                        <SensitiveInput
+                          as="field"
+                          type="text"
+                          id="hardcoverapikey"
+                          name="hardcoverapikey"
+                          className="rounded-l-only"
+                        />
+                        <CopyButton
+                          textToCopy={values?.hardcoverapikey ?? ''}
+                          key={values?.hardcoverapikey}
+                        />
                       </div>
                     </div>
-                  </>
+                  </div>
                 )}
                 <div className="form-row">
                   <label htmlFor="applicationTitle" className="text-label">
@@ -404,6 +423,7 @@ const SettingsMain = () => {
                       <LanguageSelector
                         setFieldValue={setFieldValue}
                         value={values.originalLanguage}
+                        fieldName="originalLanguage"
                       />
                     </div>
                   </div>
@@ -416,13 +436,51 @@ const SettingsMain = () => {
                     </span>
                   </label>
                   <div className="form-input-area">
-                    <div className="form-input-field relative z-20">
+                    <div className="form-input-field relative">
                       <RegionSelector
                         value={values.streamingRegion}
                         name="streamingRegion"
                         onChange={setFieldValue}
                         regionType="streaming"
                         disableAll
+                      />
+                    </div>
+                  </div>
+                </div>
+                <div className="form-row">
+                  <label htmlFor="blocklistRegion" className="text-label">
+                    <span>{intl.formatMessage(messages.blocklistRegion)}</span>
+                    <span className="label-tip">
+                      {intl.formatMessage(messages.blocklistRegionTip)}
+                    </span>
+                  </label>
+                  <div className="form-input-area">
+                    <div className="form-input-field">
+                      <RegionSelector
+                        value={values.blocklistRegion}
+                        name="blocklistRegion"
+                        onChange={setFieldValue}
+                        regionType="discover"
+                      />
+                    </div>
+                  </div>
+                </div>
+                <div className="form-row">
+                  <label htmlFor="blocklistLanguage" className="text-label">
+                    <span>
+                      {intl.formatMessage(messages.blocklistLanguage)}
+                    </span>
+                    <span className="label-tip">
+                      {intl.formatMessage(messages.blocklistLanguageTip)}
+                    </span>
+                  </label>
+                  <div className="form-input-area">
+                    <div className="form-input-field relative z-20">
+                      <LanguageSelector
+                        setFieldValue={setFieldValue}
+                        serverValue={data?.blocklistLanguage}
+                        value={values.blocklistLanguage}
+                        fieldName="blocklistLanguage"
                       />
                     </div>
                   </div>
@@ -515,6 +573,26 @@ const SettingsMain = () => {
                   </div>
                 </div>
                 <div className="form-row">
+                  <label htmlFor="hideRequested" className="checkbox-label">
+                    <span className="mr-2">
+                      {intl.formatMessage(messages.hideRequested)}
+                    </span>
+                    <span className="label-tip">
+                      {intl.formatMessage(messages.hideRequestedTip)}
+                    </span>
+                  </label>
+                  <div className="form-input-area">
+                    <Field
+                      type="checkbox"
+                      id="hideRequested"
+                      name="hideRequested"
+                      onChange={() => {
+                        setFieldValue('hideRequested', !values.hideRequested);
+                      }}
+                    />
+                  </div>
+                </div>
+                <div className="form-row">
                   <label
                     htmlFor="partialRequestsEnabled"
                     className="checkbox-label"
@@ -581,6 +659,24 @@ const SettingsMain = () => {
                       typeof errors.youtubeUrl === 'string' && (
                         <div className="error">{errors.youtubeUrl}</div>
                       )}
+                  </div>
+                </div>
+                <div className="form-row">
+                  <label htmlFor="versionCheck" className="text-label">
+                    {intl.formatMessage(messages.versionCheck)}
+                    <span className="label-tip">
+                      {intl.formatMessage(messages.versionCheckTip)}
+                    </span>
+                  </label>
+                  <div className="form-input-area">
+                    <Field
+                      type="checkbox"
+                      id="versionCheck"
+                      name="versionCheck"
+                      onChange={() => {
+                        setFieldValue('versionCheck', !values.versionCheck);
+                      }}
+                    />
                   </div>
                 </div>
                 <div className="actions">

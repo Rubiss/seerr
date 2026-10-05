@@ -2,7 +2,9 @@ import Modal from '@app/components/Common/Modal';
 import globalMessages from '@app/i18n/globalMessages';
 import defineMessages from '@app/utils/defineMessages';
 import { Transition } from '@headlessui/react';
+
 import type { BookDetails } from '@server/models/Book';
+import type { Collection } from '@server/models/Collection';
 import type { MovieDetails } from '@server/models/Movie';
 import type { TvDetails } from '@server/models/Tv';
 import axios from 'axios';
@@ -22,18 +24,21 @@ const messages = defineMessages('component.BlocklistModal', {
   blocklisting: 'Blocklisting',
 });
 
-const isMovie = (
-  movie: MovieDetails | TvDetails | BookDetails | null
-): movie is MovieDetails => {
-  if (!movie) return false;
-  return (movie as MovieDetails).title !== undefined;
+const isCollection = (
+  data: MovieDetails | TvDetails | Collection | BookDetails | null
+): data is Collection => {
+  return (
+    data !== null &&
+    data !== undefined &&
+    (data as Collection).parts !== undefined
+  );
 };
 
-const isBook = (
-  item: MovieDetails | TvDetails | BookDetails | null
-): item is BookDetails => {
-  if (!item) return false;
-  return (item as BookDetails).id !== undefined && 'author' in item;
+const isMovie = (
+  movie: MovieDetails | TvDetails | Collection | BookDetails | null
+): movie is MovieDetails | BookDetails => {
+  if (!movie) return false;
+  return (movie as MovieDetails).title !== undefined;
 };
 
 const BlocklistModal = ({
@@ -46,7 +51,7 @@ const BlocklistModal = ({
 }: BlocklistModalProps) => {
   const intl = useIntl();
   const [data, setData] = useState<
-    TvDetails | MovieDetails | BookDetails | null
+    TvDetails | MovieDetails | Collection | BookDetails | null
   >(null);
   const [error, setError] = useState(null);
 
@@ -78,14 +83,22 @@ const BlocklistModal = ({
         loading={!data && !error}
         backgroundClickable
         title={`${intl.formatMessage(globalMessages.blocklist)} ${
-          type === 'book'
-            ? intl.formatMessage(globalMessages.book)
-            : type === 'movie'
-              ? intl.formatMessage(globalMessages.movie)
-              : intl.formatMessage(globalMessages.tvshow)
+          type === 'collection'
+            ? intl.formatMessage(globalMessages.collection)
+            : type === 'book'
+              ? intl.formatMessage(globalMessages.book)
+              : isMovie(data)
+                ? intl.formatMessage(globalMessages.movie)
+                : intl.formatMessage(globalMessages.tvshow)
         }`}
         subTitle={`${
-          isMovie(data) ? data.title : isBook(data) ? data.title : data?.name
+          isCollection(data)
+            ? data.name
+            : type === 'book'
+              ? intl.formatMessage(globalMessages.book)
+              : isMovie(data)
+                ? data.title
+                : data?.name
         }`}
         onCancel={onCancel}
         onOk={onComplete}
@@ -96,7 +109,11 @@ const BlocklistModal = ({
         }
         okButtonType="danger"
         okDisabled={isUpdating}
-        backdrop={data?.backdropPath}
+        backdrop={
+          isCollection(data)
+            ? `https://image.tmdb.org/t/p/w1920_and_h800_multi_faces/${data.backdropPath}`
+            : data?.backdropPath
+        }
         cache={type === 'book' ? 'hardcover' : 'tmdb'}
       />
     </Transition>

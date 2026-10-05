@@ -79,6 +79,21 @@ class ReadarrScanner
   }
 
   private async processReadarrBook(readarrBook: ReadarrBook): Promise<void> {
+    try {
+      await this.syncBook(readarrBook, this.currentServer);
+    } catch (e) {
+      this.log('Failed to process Readarr media', 'error', {
+        errorMessage: e.message,
+        title: readarrBook.title,
+      });
+    }
+  }
+
+  // Import callbacks share the scan's update path without changing scan state.
+  public async syncBook(
+    readarrBook: ReadarrBook,
+    server: ReadarrSettings
+  ): Promise<void> {
     const isFullyDownloaded = readarrBook.statistics?.percentOfBooks >= 100;
 
     if (!readarrBook.monitored && !readarrBook.grabbed && !isFullyDownloaded) {
@@ -92,43 +107,21 @@ class ReadarrScanner
       return;
     }
 
-    try {
-      const serverAudio = this.currentServer.isAudio;
-      const hcId = parseInt(readarrBook.foreignBookId, 10);
+    const serverAudio = server.isAudio;
+    const hcId = Number(readarrBook.foreignBookId);
 
-      if (isNaN(hcId)) {
-        this.log('Invalid Hardcover ID for book. Skipping item.', 'warn', {
-          title: readarrBook.title,
-          foreignBookId: readarrBook.foreignBookId,
-        });
-        return;
-      }
-
-      // Determine processing status:
-      // - If grabbed but not fully downloaded: processing
-      // - If not grabbed but fully downloaded: available (not processing)
-      // - If neither grabbed nor fully downloaded: processing (default)
-      let isProcessing = true;
-      if (isFullyDownloaded) {
-        isProcessing = false; // Book is fully downloaded, mark as available
-      } else if (readarrBook.grabbed) {
-        isProcessing = true; // Book is grabbed but not fully downloaded yet
-      }
-
-      await this.processBook(hcId, {
-        isAlt: serverAudio,
-        serviceId: this.currentServer.id,
-        externalServiceId: readarrBook.id,
-        externalServiceSlug: readarrBook.titleSlug,
-        title: readarrBook.title,
-        processing: isProcessing,
-      });
-    } catch (e) {
-      this.log('Failed to process Readarr media', 'error', {
-        errorMessage: e.message,
-        title: readarrBook.title,
-      });
+    if (!Number.isSafeInteger(hcId) || hcId <= 0) {
+      throw new Error('Invalid Hardcover ID for book');
     }
+
+    await this.processBook(hcId, {
+      isAlt: serverAudio,
+      serviceId: server.id,
+      externalServiceId: readarrBook.id,
+      externalServiceSlug: readarrBook.titleSlug,
+      title: readarrBook.title,
+      processing: !isFullyDownloaded,
+    });
   }
 }
 

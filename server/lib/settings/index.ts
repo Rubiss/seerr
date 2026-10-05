@@ -150,6 +150,7 @@ export interface MainSettings {
   };
   hideAvailable: boolean;
   hideBlocklisted: boolean;
+  hideRequested: boolean;
   localLogin: boolean;
   mediaServerLogin: boolean;
   newPlexLogin: boolean;
@@ -165,6 +166,7 @@ export interface MainSettings {
   enableSpecialEpisodes: boolean;
   locale: string;
   youtubeUrl: string;
+  versionCheck: boolean;
 }
 
 export interface ProxySettings {
@@ -202,6 +204,7 @@ interface FullPublicSettings extends PublicSettings {
   applicationUrl: string;
   hideAvailable: boolean;
   hideBlocklisted: boolean;
+  hideRequested: boolean;
   localLogin: boolean;
   mediaServerLogin: boolean;
   movie4kEnabled: boolean;
@@ -224,6 +227,7 @@ interface FullPublicSettings extends PublicSettings {
   userEmailRequired: boolean;
   newPlexLogin: boolean;
   youtubeUrl: string;
+  versionCheck: boolean;
   plexClientIdentifier: string;
 }
 
@@ -239,6 +243,7 @@ export interface NotificationAgentDiscord extends NotificationAgentConfig {
     botAvatarUrl?: string;
     webhookUrl: string;
     webhookRoleId?: string;
+    webhookThreadId?: string;
     enableMentions: boolean;
     locale: AvailableLocale;
     useUserLocale: boolean;
@@ -265,6 +270,7 @@ export interface NotificationAgentEmail extends NotificationAgentConfig {
     authPass?: string;
     allowSelfSigned: boolean;
     senderName: string;
+    usePublicLogo: boolean;
     pgpPrivateKey?: string;
     pgpPassword?: string;
   };
@@ -318,6 +324,7 @@ export interface NotificationAgentNtfy extends NotificationAgentConfig {
   options: {
     url: string;
     topic: string;
+    tags?: string;
     authMethodUsernamePassword?: boolean;
     username?: string;
     password?: string;
@@ -404,6 +411,7 @@ const SETTINGS_PATH = process.env.CONFIG_DIRECTORY
 
 class Settings {
   private data: AllSettings;
+  private saveLock: Promise<void> = Promise.resolve();
 
   constructor(initialSettings?: AllSettings) {
     this.data = {
@@ -425,6 +433,7 @@ class Settings {
         },
         hideAvailable: false,
         hideBlocklisted: false,
+        hideRequested: false,
         localLogin: true,
         mediaServerLogin: true,
         newPlexLogin: true,
@@ -440,6 +449,7 @@ class Settings {
         enableSpecialEpisodes: false,
         locale: 'en',
         youtubeUrl: '',
+        versionCheck: true,
       },
       plex: {
         name: '',
@@ -486,6 +496,7 @@ class Settings {
               requireTls: false,
               allowSelfSigned: false,
               senderName: 'Seerr',
+              usePublicLogo: false,
             },
           },
           discord: {
@@ -571,6 +582,7 @@ class Settings {
             options: {
               url: '',
               topic: '',
+              tags: '',
               priority: 3,
               locale: 'en',
             },
@@ -731,6 +743,7 @@ class Settings {
       applicationUrl: this.data.main.applicationUrl,
       hideAvailable: this.data.main.hideAvailable,
       hideBlocklisted: this.data.main.hideBlocklisted,
+      hideRequested: this.data.main.hideRequested,
       localLogin: this.data.main.localLogin,
       mediaServerLogin: this.data.main.mediaServerLogin,
       jellyfinExternalHost: this.data.jellyfin.externalHostname,
@@ -759,7 +772,8 @@ class Settings {
         this.data.notifications.agents.email.options.userEmailRequired,
       newPlexLogin: this.data.main.newPlexLogin,
       youtubeUrl: this.data.main.youtubeUrl,
-      plexClientIdentifier: this.clientId,
+      versionCheck: this.data.main.versionCheck,
+      plexClientIdentifier: this.data.clientId,
     };
   }
 
@@ -849,16 +863,22 @@ class Settings {
       await this.save();
     }
 
+    let change = false;
     if (data && !raw) {
       const parsedJson = JSON.parse(data);
       const migratedData = await runMigrations(parsedJson, SETTINGS_PATH);
-      this.data = mergeSettings(this.data, migratedData);
+      const merged = mergeSettings(this.data, migratedData);
+
+      if (JSON.stringify(merged) !== JSON.stringify(migratedData)) {
+        change = true;
+      }
+
+      this.data = merged;
     } else if (data) {
       this.data = JSON.parse(data);
     }
 
     // generate keys and ids if it's missing
-    let change = false;
     if (!this.data.main.apiKey) {
       this.data.main.apiKey = this.generateApiKey();
       change = true;
@@ -889,9 +909,17 @@ class Settings {
   }
 
   public async save(): Promise<void> {
-    const tmp = SETTINGS_PATH + '.tmp';
-    await fs.writeFile(tmp, JSON.stringify(this.data, undefined, ' '));
-    await fs.rename(tmp, SETTINGS_PATH);
+    const savePromise = this.saveLock.then(async () => {
+      const tmp = SETTINGS_PATH + '.tmp';
+      await fs.writeFile(tmp, JSON.stringify(this.data, undefined, ' '));
+      await fs.rename(tmp, SETTINGS_PATH);
+    });
+
+    this.saveLock = savePromise.catch(() => {
+      // Keep the chain alive so future saves aren't blocked by past failures
+    });
+
+    return savePromise;
   }
 }
 

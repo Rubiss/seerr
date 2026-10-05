@@ -249,7 +249,7 @@ const IssueDetails = () => {
             src={
               data.posterPath
                 ? data.posterPath
-                : '/images/jellyseerr_poster_not_found.png'
+                : '/images/seerr_poster_not_found.png'
             }
             alt=""
             sizes="100vw"

@@ -36,6 +36,7 @@ export class Blocklist implements BlocklistItem {
   @ManyToOne(() => User, (user) => user.id, {
     eager: true,
   })
+  @Index()
   user?: User;
 
   @OneToOne(() => Media, (media) => media.blocklist, {
@@ -80,7 +81,7 @@ export class Blocklist implements BlocklistItem {
         : { tmdbId: blocklistRequest.externalId };
 
     let media = await mediaRepository.findOne({
-      where: whereCondition,
+      where: { ...whereCondition, mediaType: blocklistRequest.mediaType },
     });
 
     const blocklistRepository = em.getRepository(this);
