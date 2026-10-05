@@ -1,5 +1,6 @@
 import useToasts from '@app/hooks/useToasts';
 import globalMessages from '@app/i18n/globalMessages';
+import { getDiscoverPagination } from '@app/utils/discoverPagination';
 import { MediaStatus } from '@server/constants/media';
 import { useEffect } from 'react';
 import { useIntl } from 'react-intl';
@@ -164,12 +165,18 @@ const useDiscover = <
     });
   }
 
-  const isEmpty = !isLoadingInitialData && titles?.length === 0;
-  const isReachingEnd =
-    isEmpty ||
-    (!!data && (data[data?.length - 1]?.results.length ?? 0) < 20) ||
-    (!!data && (data[data?.length - 1]?.totalResults ?? 0) <= size * 20) ||
-    (!!data && (data[data?.length - 1]?.totalResults ?? 0) < 41);
+  const { isEmpty, isReachingEnd, needsMore } = getDiscoverPagination(
+    data,
+    size,
+    titles.length
+  );
+
+  useEffect(() => {
+    if (needsMore && !isValidating && !error) {
+      // SWR exposes fetch failures through `error`; stop paging on failure.
+      void setSize(size + 1).catch(() => undefined);
+    }
+  }, [needsMore, isValidating, error, setSize, size]);
 
   useEffect(() => {
     if (error && titles.length) {
