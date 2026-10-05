@@ -6,18 +6,14 @@ describe('Filtered book discovery', () => {
     cy.request('/api/v1/settings/main').then(({ body }) => {
       originalHideAvailable = body.hideAvailable;
       cy.request('POST', '/api/v1/settings/main', {
-        ...body,
         hideAvailable: true,
       });
     });
   });
 
   afterEach(() => {
-    cy.request('/api/v1/settings/main').then(({ body }) => {
-      cy.request('POST', '/api/v1/settings/main', {
-        ...body,
-        hideAvailable: originalHideAvailable,
-      });
+    cy.request('POST', '/api/v1/settings/main', {
+      hideAvailable: originalHideAvailable,
     });
   });
 
