@@ -1,6 +1,6 @@
-import { getDiscoverPagination } from '@app/utils/discoverPagination';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { getDiscoverPagination } from './discoverPagination';
 
 describe('filtered discovery pagination', () => {
   const firstPages = Array.from({ length: 3 }, () => ({
