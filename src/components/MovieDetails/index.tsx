@@ -657,7 +657,7 @@ const MovieDetails = ({ movie }: MovieDetailsProps) => {
           {hasPermission(Permission.MANAGE_REQUESTS) &&
             data.mediaInfo &&
             (data.mediaInfo.jellyfinMediaId ||
-              data.mediaInfo.jellyfinMediaId4k ||
+              data.mediaInfo.jellyfinMediaIdAlt ||
               data.mediaInfo.status !== MediaStatus.UNKNOWN ||
               data.mediaInfo.statusAlt !== MediaStatus.UNKNOWN) && (
               <Tooltip content={intl.formatMessage(messages.managemovie)}>

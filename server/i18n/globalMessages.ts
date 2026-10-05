@@ -18,6 +18,8 @@ const globalMessages = defineMessages('notifications.common', {
   viewMedia: 'View Media in {applicationTitle}',
   openIn: 'Open in {applicationTitle}',
   movie: 'movie',
+  book: 'book',
+  audiobook: 'audiobook',
   series: 'series',
   issue: 'issue',
   issueTypeName: '{type} issue',

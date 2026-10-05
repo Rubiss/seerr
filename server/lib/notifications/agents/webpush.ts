@@ -79,9 +79,16 @@ class WebPushAgent
     const mediaType = payload.media
       ? payload.media.mediaType === MediaType.MOVIE
         ? intl.formatMessage(globalMessages.movie)
-        : intl.formatMessage(globalMessages.series)
+        : payload.media.mediaType === MediaType.BOOK
+          ? intl.formatMessage(
+              payload.request?.isAlt
+                ? globalMessages.audiobook
+                : globalMessages.book
+            )
+          : intl.formatMessage(globalMessages.series)
       : undefined;
-    const is4k = payload.request?.is4k;
+    const is4k =
+      payload.request?.isAlt && payload.media?.mediaType !== MediaType.BOOK;
     const quality = is4k ? '4K ' : '';
 
     const issueType = payload.issue

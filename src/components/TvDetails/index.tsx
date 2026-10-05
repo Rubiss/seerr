@@ -289,7 +289,7 @@ const TvDetails = ({ tv }: TvDetailsProps) => {
     const requestedSeasons = (data?.mediaInfo?.requests ?? [])
       .filter(
         (request) =>
-          request.is4k === is4k &&
+          request.isAlt === is4k &&
           request.status !== MediaRequestStatus.DECLINED &&
           request.status !== MediaRequestStatus.COMPLETED
       )
@@ -841,7 +841,7 @@ const TvDetails = ({ tv }: TvDetailsProps) => {
                     (r) =>
                       !!r.seasons.find(
                         (s) => s.seasonNumber === season.seasonNumber
-                      ) && !r.is4k
+                      ) && !r.isAlt
                   )
                   .sort(
                     (a, b) =>
@@ -853,7 +853,7 @@ const TvDetails = ({ tv }: TvDetailsProps) => {
                     (r) =>
                       !!r.seasons.find(
                         (s) => s.seasonNumber === season.seasonNumber
-                      ) && r.is4k
+                      ) && r.isAlt
                   )
                   .sort(
                     (a, b) =>

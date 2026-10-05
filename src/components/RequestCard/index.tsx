@@ -89,7 +89,7 @@ const RequestCardError = ({ requestData }: RequestCardErrorProps) => {
 
   const requestDownloadStatus = getRequestDownloadStatus(
     requestData?.media?.[
-      requestData?.is4k ? 'downloadStatus4k' : 'downloadStatus'
+      requestData?.isAlt ? 'downloadStatusAlt' : 'downloadStatus'
     ],
     requestData?.type === 'tv'
       ? (requestData?.seasons ?? []).map((season) => season.seasonNumber)
@@ -341,7 +341,9 @@ const RequestCard = ({ request, onTitleData }: RequestCardProps) => {
   }
 
   const requestDownloadStatus = getRequestDownloadStatus(
-    requestData.media[requestData.is4k ? 'downloadStatus4k' : 'downloadStatus'],
+    requestData.media[
+      requestData.isAlt ? 'downloadStatusAlt' : 'downloadStatus'
+    ],
     requestData.type === 'tv'
       ? requestData.seasons.map((season) => season.seasonNumber)
       : []

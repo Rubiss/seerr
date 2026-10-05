@@ -386,9 +386,10 @@ export class User {
             requestedBy: {
               id: this.id,
             },
-            createdAt: AfterDate(bookDate),
+            ...(bookQuotaDays ? { createdAt: AfterDate(bookDate) } : {}),
             type: MediaType.BOOK,
             status: Not(MediaRequestStatus.DECLINED),
+            ignoreQuota: false,
           },
         })
       : 0;
