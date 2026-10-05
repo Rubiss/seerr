@@ -239,22 +239,24 @@ mediaRoutes.delete(
         );
       }
 
+      const serviceId = media[isAlt ? 'serviceIdAlt' : 'serviceId'];
       if (
-        media.serviceId &&
-        media.serviceId >= 0 &&
-        serviceSettings?.id !== media.serviceId
+        serviceId !== undefined &&
+        serviceId !== null &&
+        serviceId >= 0 &&
+        serviceSettings?.id !== serviceId
       ) {
         if (isMovie) {
           serviceSettings = settings.radarr.find(
-            (radarr) => radarr.id === media.serviceId
+            (radarr) => radarr.id === serviceId
           );
         } else if (isBook) {
           serviceSettings = settings.readarr.find(
-            (readarr) => readarr.id === media.serviceId
+            (readarr) => readarr.id === serviceId
           );
         } else {
           serviceSettings = settings.sonarr.find(
-            (sonarr) => sonarr.id === media.serviceId
+            (sonarr) => sonarr.id === serviceId
           );
         }
       }
