@@ -20,6 +20,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: upstream-sync
@@ -47,6 +48,8 @@ jobs:
       - name: Find an unmerged upstream release
         id: release
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           tag=$(git ls-remote --tags --refs --sort=-v:refname "$UPSTREAM" 'v*' \
             | sed 's#.*refs/tags/##' \
@@ -56,8 +59,8 @@ jobs:
 
           if git merge-base --is-ancestor "$tag" HEAD; then
             echo "$BASE already contains $tag"
-          elif git ls-remote --exit-code --heads origin "sync/$tag" >/dev/null; then
-            echo "sync/$tag already exists"
+          elif [[ -n $(gh pr list --repo "$GITHUB_REPOSITORY" --head "sync/$tag" --state all --json number --jq '.[].number') ]]; then
+            echo "A pull request for sync/$tag already exists"
           else
             echo "tag=$tag" >> "$GITHUB_OUTPUT"
           fi
@@ -148,8 +151,14 @@ jobs:
           TAG: ${{ steps.release.outputs.tag }}
           FILES: ${{ steps.merge.outputs.files }}
         run: |
+          # Unresolved means still unmerged in the index (which also covers
+          # conflicts without markers, such as modify/delete) or markers left
+          # in a file that was staged anyway.
           mapfile -t files <<< "$FILES"
-          unresolved=$(grep -slE '^(<<<<<<<|>>>>>>>)( |$)' -- "${files[@]}" || true)
+          unresolved=$(
+            git diff --name-only --diff-filter=U
+            grep -slE '^(<<<<<<<|>>>>>>>)( |$)' -- "${files[@]}" || true
+          )
 
           if [[ -z "$unresolved" ]]; then
             # Tracked files only, so build output Claude left behind stays out.
@@ -174,7 +183,9 @@ jobs:
           FILES: ${{ steps.merge.outputs.files }}
         run: |
           # Blank any auth header an earlier step configured so SYNC_TOKEN is used.
-          git -c http.https://github.com/.extraheader= push \
+          # Forced because a branch left by a run that died before opening its
+          # pull request is safe to replace.
+          git -c http.https://github.com/.extraheader= push --force \
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
             "HEAD:refs/heads/sync/$TAG"
 
