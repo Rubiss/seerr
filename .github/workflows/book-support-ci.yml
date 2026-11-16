@@ -1,0 +1,49 @@
+---
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+# Fork-only checks for pull requests into book-support. Kept apart from ci.yml
+# so upstream changes to that file never conflict with ours.
+name: Book Support CI
+
+on:
+  pull_request:
+    branches:
+      - book-support
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  migration-smoke:
+    name: Migration Smoke
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
+
+      - name: Build image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: seerr:pr
+          build-args: |
+            COMMIT_TAG=${{ github.sha }}
+          # Shares the layer cache the Book Support Preview build writes.
+          cache-from: type=gha,scope=linux/amd64
+          provenance: false
+
+      # Upgrades a database created by the currently published image.
+      - name: Upgrade the published image's database
+        shell: bash
+        run: bash bin/migration-smoke.sh "ghcr.io/${GITHUB_REPOSITORY,,}:book-support" seerr:pr
