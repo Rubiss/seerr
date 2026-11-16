@@ -301,22 +301,56 @@ export class MediaRequest {
       }
     }
 
-    let rootFolder = requestBody.rootFolder;
-    let profileId = requestBody.profileId;
-    let tags = requestBody.tags;
-    let metadataProfileId = requestBody.metadataProfileId;
-
-    const ruleResult = await overrideRules({
-      mediaType: requestBody.mediaType,
-      is4k: requestBody.isAlt || false,
-      tmdbMedia: mediaDetails,
-      requestUser,
-      tags,
-    });
     const isAdvanced = user.hasPermission(
       [Permission.MANAGE_REQUESTS, Permission.REQUEST_ADVANCED],
       { type: 'or' }
     );
+
+    const requestsServer =
+      isAdvanced && requestBody.serverId != null && requestBody.serverId >= 0;
+
+    // An unknown serverId, or one for the other alt (4K/audio) type, falls back to the default server
+    const isAlt = requestBody.isAlt || false;
+    const requestedServiceId =
+      requestsServer &&
+      (requestBody.mediaType === MediaType.MOVIE
+        ? settings.radarr.some(
+            (server) =>
+              server.id === requestBody.serverId && server.is4k === isAlt
+          )
+        : requestBody.mediaType === MediaType.BOOK
+          ? settings.readarr.some(
+              (server) =>
+                server.id === requestBody.serverId && server.isAudio === isAlt
+            )
+          : settings.sonarr.some(
+              (server) =>
+                server.id === requestBody.serverId && server.is4k === isAlt
+            ))
+        ? requestBody.serverId
+        : undefined;
+
+    const useRequestedOptions =
+      isAdvanced && (!requestsServer || requestedServiceId !== undefined);
+
+    let rootFolder = useRequestedOptions ? requestBody.rootFolder : undefined;
+    let profileId = useRequestedOptions ? requestBody.profileId : undefined;
+    let tags = useRequestedOptions ? requestBody.tags : undefined;
+    let metadataProfileId = useRequestedOptions
+      ? requestBody.metadataProfileId
+      : undefined;
+    const languageProfileId = useRequestedOptions
+      ? requestBody.languageProfileId
+      : undefined;
+
+    const ruleResult = await overrideRules({
+      mediaType: requestBody.mediaType,
+      is4k: isAlt,
+      serviceId: requestedServiceId,
+      tmdbMedia: mediaDetails,
+      requestUser,
+      tags,
+    });
     // Advanced users pick these in the modal, so we don't want to override them if they are set
     const overrideRulesResult = isAdvanced
       ? {
@@ -388,7 +422,7 @@ export class MediaRequest {
           ? user
           : undefined,
         isAlt: requestBody.isAlt,
-        serverId: requestBody.serverId,
+        serverId: requestedServiceId,
         profileId: profileId,
         rootFolder: rootFolder,
         tags: tags,
@@ -435,7 +469,7 @@ export class MediaRequest {
           ? user
           : undefined,
         isAlt: requestBody.isAlt,
-        serverId: requestBody.serverId,
+        serverId: requestedServiceId,
         profileId: profileId,
         metadataProfileId: metadataProfileId,
         rootFolder: rootFolder,
@@ -551,10 +585,10 @@ export class MediaRequest {
           ? user
           : undefined,
         isAlt: requestBody.isAlt,
-        serverId: requestBody.serverId,
+        serverId: requestedServiceId,
         profileId: profileId,
         rootFolder: rootFolder,
-        languageProfileId: requestBody.languageProfileId,
+        languageProfileId: languageProfileId,
         tags: tags,
         seasons: finalSeasons.map(
           (sn) =>
