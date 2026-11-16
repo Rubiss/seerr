@@ -61,7 +61,9 @@ router.get<{
   type: string;
   path: string[];
 }>('/:type/*path', async (req, res, next) => {
-  if (!getSettings().main.cacheImages) {
+  // Hardcover images are always loaded through the proxy (see CachedImage),
+  // so the caching setting only gates the other providers.
+  if (req.params.type !== 'hardcover' && !getSettings().main.cacheImages) {
     return next({ status: 404, message: 'Image caching is disabled.' });
   }
 
