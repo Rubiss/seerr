@@ -178,7 +178,9 @@ jobs:
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
             "HEAD:refs/heads/sync/$TAG"
 
-          body="Merges upstream release [$TAG](https://github.com/seerr-team/seerr/releases/tag/$TAG) into \`$BASE\`."
+          # Uses the pull request template's headings so PR Validation passes.
+          body=$'## Description\n\n'
+          body+="Merges upstream release [$TAG](https://github.com/seerr-team/seerr/releases/tag/$TAG) into \`$BASE\`."
           case "$STATE" in
             clean)
               body+=$'\n\nThe merge applied cleanly.'
@@ -190,6 +192,9 @@ jobs:
               body+=$'\n\nThe merge conflicts and Claude could not resolve it. Merge `'"$BASE"$'` into this branch and fix:\n\n```\n'"$FILES"$'\n```'
               ;;
           esac
+          body+=$'\n\n## How Has This Been Tested?\n\nBy the checks on this pull request, including the migration smoke test.'
+          body+=$'\n\n## Checklist:\n\n- [x] I have read and followed the contribution guidelines.'
+          body+=$'\n- [x] Disclosed any use of AI: opened by the Upstream Sync workflow, with any conflicts resolved by Claude.'
 
           create_args=()
           [[ "$STATE" == unresolved ]] && create_args+=(--draft)
