@@ -832,6 +832,7 @@ settingsRoutes.get('/cache', async (_req, res) => {
   }));
 
   const tmdbImageCache = await ImageProxy.getImageStats('tmdb');
+  const tvdbImageCache = await ImageProxy.getImageStats('tvdb');
   const avatarImageCache = await ImageProxy.getImageStats('avatar');
   const hardcoverImageCache = await ImageProxy.getImageStats('hardcover');
 
@@ -842,6 +843,7 @@ settingsRoutes.get('/cache', async (_req, res) => {
     apiCaches,
     imageCache: {
       tmdb: tmdbImageCache,
+      tvdb: tvdbImageCache,
       avatar: avatarImageCache,
       hardcover: hardcoverImageCache,
     },

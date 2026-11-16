@@ -69,7 +69,7 @@ export interface CacheItem {
 export interface CacheResponse {
   apiCaches: CacheItem[];
   imageCache: Record<
-    'tmdb' | 'avatar' | 'hardcover',
+    'tmdb' | 'tvdb' | 'avatar' | 'hardcover',
     { size: number; imageCount: number }
   >;
   dnsCache: {
