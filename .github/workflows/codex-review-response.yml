@@ -130,7 +130,9 @@ jobs:
               from upstream to satisfy a reviewer.
 
             If you changed code, run `pnpm install`, `pnpm typecheck`, `pnpm lint`,
-            `pnpm format:check` and `pnpm test`, and fix what you broke.
+            `pnpm format:check` and `pnpm test`, and fix what you broke. Stage any
+            file you create for a fix with `git add`; only tracked and staged
+            files are published.
 
             Then write `${{ env.REVIEW_DIR }}/replies.json`: a JSON array with one
             `{"threadId": "...", "reply": "..."}` object per finding you settled.
@@ -156,7 +158,8 @@ jobs:
             exit 1
           fi
 
-          # Tracked files only, so the scratch directory and build output stay out.
+          # Tracked files, plus new ones Claude staged, so the scratch directory
+          # and build output stay out.
           git add -u
           if ! git diff --cached --quiet; then
             git config user.name 'github-actions[bot]'
