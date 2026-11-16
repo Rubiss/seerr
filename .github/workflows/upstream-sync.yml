@@ -1,0 +1,206 @@
+---
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+# Keeps book-support current with upstream Seerr releases.
+#
+# Each day this looks for an upstream release tag that book-support does not
+# contain yet, merges it on a sync/<tag> branch and opens a pull request with
+# auto-merge enabled. When the merge conflicts, Claude resolves it first. If
+# Claude cannot, the pull request is opened as a conflicted draft instead and
+# this run fails so the failure is visible.
+#
+# Requires the SYNC_TOKEN secret (a token that can push branches, including
+# workflow file changes, and manage pull requests; the default GITHUB_TOKEN
+# would not trigger CI on the pull request) and CLAUDE_CODE_OAUTH_TOKEN.
+name: Upstream Sync
+
+on:
+  schedule:
+    - cron: '23 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+env:
+  UPSTREAM: https://github.com/seerr-team/seerr.git
+  BASE: book-support
+
+jobs:
+  sync:
+    name: Merge latest upstream release
+    if: github.repository == 'Rubiss/seerr'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.BASE }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Sets no output when there is nothing to do, which skips every later step.
+      - name: Find an unmerged upstream release
+        id: release
+        shell: bash
+        run: |
+          tag=$(git ls-remote --tags --refs --sort=-v:refname "$UPSTREAM" 'v*' \
+            | sed 's#.*refs/tags/##' \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+            | head -n 1)
+          git fetch --no-tags "$UPSTREAM" "+refs/tags/$tag:refs/tags/$tag"
+
+          if git merge-base --is-ancestor "$tag" HEAD; then
+            echo "$BASE already contains $tag"
+          elif git ls-remote --exit-code --heads origin "sync/$tag" >/dev/null; then
+            echo "sync/$tag already exists"
+          else
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Tooling is installed before the merge, while package.json is still valid.
+      - name: Pnpm Setup
+        if: steps.release.outputs.tag
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Set up Node.js
+        if: steps.release.outputs.tag
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: 'package.json'
+
+      - name: Merge the release
+        id: merge
+        if: steps.release.outputs.tag
+        shell: bash
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c "sync/$TAG"
+
+          if git merge --no-ff --no-edit "$TAG"; then
+            echo "state=clean" >> "$GITHUB_OUTPUT"
+          else
+            echo "state=conflicted" >> "$GITHUB_OUTPUT"
+            {
+              echo 'files<<EOF'
+              git diff --name-only --diff-filter=U
+              echo EOF
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve conflicts with Claude
+        if: steps.merge.outputs.state == 'conflicted'
+        continue-on-error: true
+        # Tracks the v1 tag and the opus alias on purpose, so new action releases
+        # bring a newer Claude Code and the alias resolves to the newest Opus.
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          claude_args: |
+            --model opus
+            --max-turns 200
+            --allowedTools "Bash,Read,Edit,Write,Glob,Grep"
+          prompt: |
+            This checkout is the `book-support` branch of a Seerr fork. The fork adds
+            book requests (Hardcover metadata, Readarr-compatible servers) on top of
+            upstream Seerr. A `git merge ${{ steps.release.outputs.tag }}` of the
+            latest upstream release is in progress and stopped on conflicts in:
+
+            ${{ steps.merge.outputs.files }}
+
+            Resolve every conflict so that upstream's changes are adopted and book
+            support keeps working:
+
+            - Keep the intent of both sides. Where upstream changed code that the
+              fork had generalised for books (for example `is4k` became `isAlt`,
+              `status4k` became `statusAlt`, blocklist `tmdbId` became `externalId`,
+              and media-type branches gained a book case), apply upstream's change
+              in the fork's form.
+            - For `pnpm-lock.yaml`, take upstream's version with
+              `git checkout --theirs pnpm-lock.yaml` and run `pnpm install`.
+            - Read every migration this release adds under `server/migration`. They
+              run against the fork's schema, where the columns above are renamed and
+              `media` has `hcId`. Adapt any migration that would fail on that schema
+              or drop the fork's columns.
+            - Run `pnpm install`, `pnpm typecheck`, `pnpm lint`, `pnpm format:check`,
+              `pnpm test` and `pnpm i18n:extract`, and fix whatever the merge broke.
+            - Stage each resolved file, and any file you create, with `git add`.
+
+            Do not commit, push, abort or continue the merge, and do not change
+            workflow files beyond resolving their conflicts. If you cannot resolve
+            a file with confidence, leave its conflict markers in place and stop.
+
+      # Falls back to the untouched upstream tag when conflict markers remain,
+      # which GitHub then shows as a conflicted pull request.
+      - name: Commit the resolution
+        id: resolution
+        if: steps.merge.outputs.state == 'conflicted'
+        shell: bash
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+          FILES: ${{ steps.merge.outputs.files }}
+        run: |
+          mapfile -t files <<< "$FILES"
+          unresolved=$(grep -slE '^(<<<<<<<|>>>>>>>)( |$)' -- "${files[@]}" || true)
+
+          if [[ -z "$unresolved" ]]; then
+            # Tracked files only, so build output Claude left behind stays out.
+            git add -u
+            git commit --no-edit
+            echo "state=resolved" >> "$GITHUB_OUTPUT"
+          else
+            echo "Still conflicted:"
+            echo "$unresolved"
+            git merge --abort
+            git checkout -f -B "sync/$TAG" "$TAG"
+            echo "state=unresolved" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open the pull request
+        if: steps.release.outputs.tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN }}
+          TAG: ${{ steps.release.outputs.tag }}
+          STATE: ${{ steps.resolution.outputs.state || steps.merge.outputs.state }}
+          FILES: ${{ steps.merge.outputs.files }}
+        run: |
+          # Blank any auth header an earlier step configured so SYNC_TOKEN is used.
+          git -c http.https://github.com/.extraheader= push \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "HEAD:refs/heads/sync/$TAG"
+
+          body="Merges upstream release [$TAG](https://github.com/seerr-team/seerr/releases/tag/$TAG) into \`$BASE\`."
+          case "$STATE" in
+            clean)
+              body+=$'\n\nThe merge applied cleanly.'
+              ;;
+            resolved)
+              body+=$'\n\nClaude resolved conflicts in:\n\n```\n'"$FILES"$'\n```'
+              ;;
+            unresolved)
+              body+=$'\n\nThe merge conflicts and Claude could not resolve it. Merge `'"$BASE"$'` into this branch and fix:\n\n```\n'"$FILES"$'\n```'
+              ;;
+          esac
+
+          create_args=()
+          [[ "$STATE" == unresolved ]] && create_args+=(--draft)
+          gh pr create --repo "$GITHUB_REPOSITORY" --base "$BASE" --head "sync/$TAG" \
+            --title "chore(sync): merge upstream $TAG" --body "$body" "${create_args[@]}"
+
+          if [[ "$STATE" == unresolved ]]; then
+            echo "::error::Upstream $TAG conflicts with $BASE and needs a manual merge"
+            exit 1
+          fi
+
+          # A merge commit keeps the upstream tag as an ancestor of book-support,
+          # which is how the next run knows this release is already merged.
+          gh pr merge "sync/$TAG" --repo "$GITHUB_REPOSITORY" --auto --merge
