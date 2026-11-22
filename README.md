@@ -22,6 +22,18 @@
 >
 > #### Note: Image caching is forced for hardcover
 
+## Discord availability announcements
+
+Enable **Media Available** in the Discord notification settings. To send those
+announcements to separate channels, set either webhook URL in the server environment:
+
+- `SEERR_BOOKS_DISCORD_WEBHOOK_URL` for ebooks and audiobooks
+- `SEERR_MOVIES_TV_DISCORD_WEBHOOK_URL` for movies and TV shows
+
+An unset destination uses the configured Discord webhook. Other selected events
+continue to use that webhook. Channel-specific announcements omit mentions and
+the default webhook's thread ID.
+
 ## Immediate book availability
 
 This book-support branch is based on the official Seerr **v3.5.0** release.
