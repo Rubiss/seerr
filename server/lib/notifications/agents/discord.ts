@@ -3,6 +3,7 @@ import {
   EmbedColors,
 } from '@server/constants/discord';
 import { IssueStatus, IssueTypeName } from '@server/constants/issue';
+import { MediaType } from '@server/constants/media';
 import { getRepository } from '@server/datasource';
 import { User } from '@server/entity/User';
 import { getIntl } from '@server/i18n';
@@ -22,6 +23,18 @@ import { BaseAgent } from './agent';
 
 const isValidSnowflake = (id: string): boolean =>
   DISCORD_SNOWFLAKE_REGEX.test(id);
+
+function availabilityWebhook(type: Notification, mediaType?: MediaType) {
+  if (type !== Notification.MEDIA_AVAILABLE) return;
+
+  switch (mediaType) {
+    case MediaType.BOOK:
+      return process.env.SEERR_BOOKS_DISCORD_WEBHOOK_URL;
+    case MediaType.MOVIE:
+    case MediaType.TV:
+      return process.env.SEERR_MOVIES_TV_DISCORD_WEBHOOK_URL;
+  }
+}
 
 interface DiscordImageEmbed {
   url?: string;
@@ -249,10 +262,11 @@ class DiscordAgent
       subject: payload.subject,
     });
 
+    const destination = availabilityWebhook(type, payload.media?.mediaType);
     const userMentions: string[] = [];
 
     try {
-      if (settings.options.enableMentions) {
+      if (!destination && settings.options.enableMentions) {
         if (payload.notifyUser) {
           if (
             payload.notifyUser.settings?.hasNotificationType(
@@ -299,6 +313,7 @@ class DiscordAgent
       const allowedRoleIds: string[] = [];
 
       if (
+        !destination &&
         settings.options.webhookRoleId &&
         isValidSnowflake(settings.options.webhookRoleId)
       ) {
@@ -313,8 +328,8 @@ class DiscordAgent
         ? (payload.notifyUser?.settings?.locale as AvailableLocale)
         : (settings.options.locale as AvailableLocale);
 
-      const webhookUrl = new URL(settings.options.webhookUrl);
-      if (settings.options.webhookThreadId) {
+      const webhookUrl = new URL(destination || settings.options.webhookUrl);
+      if (!destination && settings.options.webhookThreadId) {
         webhookUrl.searchParams.set(
           'thread_id',
           settings.options.webhookThreadId
