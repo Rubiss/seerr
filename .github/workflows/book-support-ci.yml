@@ -28,7 +28,9 @@ jobs:
           fetch-depth: 0
 
       - name: Verify upstream Trending parameters
-        run: /usr/bin/python3 bin/check-trending-contract.py
+        run: |
+          git fetch --no-tags https://github.com/seerr-team/seerr.git '+refs/tags/v*:refs/tags/upstream/v*'
+          /usr/bin/python3 bin/check-trending-contract.py
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4

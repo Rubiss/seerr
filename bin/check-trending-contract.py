@@ -11,7 +11,7 @@ def trending_parameters(document):
 
 
 release = subprocess.check_output(
-    ["git", "describe", "--tags", "--abbrev=0", "--match", "v[0-9]*"], text=True
+    ["git", "describe", "--tags", "--abbrev=0", "--match", "upstream/v[0-9]*"], text=True
 ).strip()
 upstream = subprocess.check_output(["git", "show", f"{release}:seerr-api.yml"])
 actual = trending_parameters(Path("seerr-api.yml").read_bytes())
